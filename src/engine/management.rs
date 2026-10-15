@@ -26,6 +26,9 @@ fn text_valid(value: &str, empty: bool) -> bool {
         && !value.chars().any(char::is_control)
 }
 pub(super) fn validate_patch(p: &AccountPatch) -> Result<(), String> {
+    if p.game_profile_id.is_some() && (p.target.is_none() || p.clear_target) {
+        return Err("Choose a saved game together with its destination".into());
+    }
     if let Some(t) = &p.target {
         t.validate()?;
     }
@@ -40,16 +43,29 @@ pub(super) fn validate_patch(p: &AccountPatch) -> Result<(), String> {
     }
     Ok(())
 }
+pub(super) fn validate_game_assignment(db: &Database, p: &AccountPatch) -> Result<(), String> {
+    if let Some(id) = p.game_profile_id
+        && !db
+            .game_profiles
+            .iter()
+            .any(|g| g.id == id && Some(&g.target) == p.target.as_ref())
+    {
+        return Err("Saved game no longer matches this destination; choose it again".into());
+    }
+    Ok(())
+}
 pub(super) fn apply_patch(a: &mut Account, p: AccountPatch) {
     if let Some(alias) = p.alias {
         a.alias = alias;
     }
     if p.clear_target {
         a.target = None;
+        a.game_profile_id = None;
         a.public_fallback_active = false;
     }
     if let Some(target) = p.target {
         a.target = Some(target);
+        a.game_profile_id = p.game_profile_id;
         a.public_fallback_active = false;
     }
     if let Some(group) = p.group {
@@ -95,6 +111,17 @@ fn expand_alias(value: &str, a: &Account, index: usize) -> String {
 }
 
 impl Engine {
+    pub fn set_game_settings(
+        &self,
+        selection: ServerSelection,
+        join_type: JoinType,
+    ) -> Result<(), String> {
+        self.transaction(|s| {
+            s.database.server_selection = selection;
+            s.database.join_type = join_type;
+            Ok(())
+        })
+    }
     pub fn set_close_to_tray(&self, enabled: bool) -> Result<(), String> {
         self.transaction(|s| {
             s.database.close_to_tray = enabled;
@@ -128,6 +155,18 @@ impl Engine {
                 return Err("Game profile not found".into());
             }
             s.database.game_profiles.retain(|p| p.id != id);
+            for saved in &mut s.database.accounts {
+                if saved.account.game_profile_id == Some(id) {
+                    saved.account.game_profile_id = None;
+                }
+            }
+            for profile in &mut s.database.profiles {
+                for entry in &mut profile.entries {
+                    if entry.game_profile_id == Some(id) {
+                        entry.game_profile_id = None;
+                    }
+                }
+            }
             Ok(())
         })
     }
@@ -195,6 +234,7 @@ impl Engine {
                         p.alias = Some(expand_alias(alias, a, i));
                     }
                     validate_patch(&p)?;
+                    validate_game_assignment(&s.database, &p)?;
                     Ok((id.clone(), p))
                 })
                 .collect::<Result<Vec<_>, String>>()?;
@@ -243,6 +283,7 @@ impl Engine {
                         account_id: id.clone(),
                         alias: a.alias.clone(),
                         target: Some(target),
+                        game_profile_id: a.game_profile_id,
                         auto_recovery: a.auto_recovery,
                         fallback_policy: a.fallback_policy,
                         group: a.group.clone(),
@@ -283,12 +324,19 @@ impl Engine {
             }
             let mut result = Vec::new();
             for entry in profile.entries {
+                let game_profile_id = entry.game_profile_id.filter(|id| {
+                    s.database
+                        .game_profiles
+                        .iter()
+                        .any(|g| g.id == *id && Some(&g.target) == entry.target.as_ref())
+                });
                 let a = account_mut(s, &entry.account_id)?;
                 apply_patch(
                     a,
                     AccountPatch {
                         alias: Some(entry.alias),
                         target: entry.target,
+                        game_profile_id,
                         auto_recovery: Some(entry.auto_recovery),
                         fallback_policy: Some(entry.fallback_policy),
                         group: Some(entry.group),

@@ -23,6 +23,7 @@ imported_cookies = []
 profiles = []
 game_profiles = []
 close_to_tray = True
+game_settings = dict(server_selection="smart", join_type="random")
 backups = []
 include_beta_updates = False
 bot = dict(enabled=True, configured=True, guild_id="42", allowed_users=["123"], status="Bot stopped. Use Start to connect.", connection_state="offline")
@@ -39,7 +40,7 @@ class Fixture(BaseHTTPRequestHandler):
         self.wfile.write(data)
     def do_GET(self):
         if self.path == "/v1/status":
-            self.reply(dict(accounts=accounts, profiles=profiles, game_profiles=game_profiles, close_to_tray=close_to_tray, update_repository="", include_beta_updates=include_beta_updates, network_suspended=False, compatibility="UI fixture · real-client validation remains outstanding"))
+            self.reply(dict(accounts=accounts, profiles=profiles, game_profiles=game_profiles, close_to_tray=close_to_tray, update_repository="", include_beta_updates=include_beta_updates, network_suspended=False, compatibility="UI fixture · real-client validation remains outstanding", **game_settings))
         elif self.path.startswith("/v1/games/"): self.reply(dict(name="Fixture game", thumbnail_url=None))
         elif self.path == "/v1/profiles": self.reply(profiles)
         elif self.path == "/v1/backups": self.reply(backups)
@@ -107,6 +108,8 @@ class Fixture(BaseHTTPRequestHandler):
             self.reply(dict(bot=bot)); return
         if self.path == "/v1/settings/window":
             close_to_tray = patch["close_to_tray"]; self.reply({}); return
+        if self.path == "/v1/settings/game":
+            game_settings.update(patch); self.reply({}); return
         if self.path == "/v1/settings/updates":
             include_beta_updates = patch["include_beta"]
             self.reply({}); return
@@ -121,13 +124,17 @@ class Fixture(BaseHTTPRequestHandler):
                 if "alias" in expanded:
                     expanded["alias"] = expanded["alias"].replace("{username}", a["username"]).replace("{id}", a["id"]).replace("{index}", str(i+1))
                 if expanded.pop("clear_target", False): expanded["target"] = None
+                if "target" in expanded: a["game_profile_id"] = expanded.get("game_profile_id")
                 a.update(expanded)
             self.reply(selected); return
         account_id = self.path.rsplit("/", 1)[-1]
         account = next((a for a in accounts if a["id"] == account_id), None)
         if account is None: self.reply({}, 404)
         elif patch.get("alias") == "REJECT": self.reply(dict(error="Simulated save rejection."), 409)
-        else: account.update(patch); self.reply(account)
+        else:
+            if patch.pop("clear_target", False): patch["target"] = None
+            if "target" in patch: account["game_profile_id"] = patch.get("game_profile_id")
+            account.update(patch); self.reply(account)
     def do_DELETE(self):
         commands.append(self.path)
         if self.path.startswith("/v1/game-profiles/"):

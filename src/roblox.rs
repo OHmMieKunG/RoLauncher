@@ -6,6 +6,8 @@ use reqwest::{
 use serde::Deserialize;
 use zeroize::Zeroizing;
 
+mod servers;
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum FailureKind {
     Network,
@@ -45,6 +47,8 @@ pub struct User {
 #[derive(Clone)]
 pub struct Roblox {
     client: Client,
+    #[cfg(test)]
+    pub(crate) presence_url: Option<String>,
 }
 impl Roblox {
     pub fn new() -> Result<Self, String> {
@@ -54,7 +58,11 @@ impl Roblox {
             .user_agent(concat!("RoLauncher/", env!("CARGO_PKG_VERSION")))
             .build()
             .map_err(|_| "Unable to initialize HTTPS client")?;
-        Ok(Self { client })
+        Ok(Self {
+            client,
+            #[cfg(test)]
+            presence_url: None,
+        })
     }
     fn cookie_header(cookie: &str) -> Result<HeaderValue, Failure> {
         let mut value = HeaderValue::from_str(&format!(".ROBLOSECURITY={cookie}"))

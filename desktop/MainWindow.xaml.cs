@@ -69,11 +69,11 @@ public sealed partial class MainWindow : Window
         }
         try { await action(); }
         catch (ApiException e) { Report(e.Message, InfoBarSeverity.Error); }
-        catch (HttpRequestException) { Report("Cannot reach the local supervisor. Check that RoLauncher is still running.", InfoBarSeverity.Error); }
-        catch (TaskCanceledException) { Report("The request timed out. Check account status before trying again.", InfoBarSeverity.Warning); }
-        catch (IOException) { Report("Unable to read the selected file.", InfoBarSeverity.Error); }
-        catch (UnauthorizedAccessException) { Report("Access to the selected file was denied.", InfoBarSeverity.Error); }
-        catch (System.Runtime.InteropServices.COMException) { Report("Windows could not open the dialog. Try again after closing any other open dialog.", InfoBarSeverity.Error); }
+        catch (HttpRequestException) { Report("Cannot reach RoLauncher. Check that it is running.", InfoBarSeverity.Error); }
+        catch (TaskCanceledException) { Report("Request timed out. Check account status before retrying.", InfoBarSeverity.Warning); }
+        catch (IOException) { Report("Cannot read this file.", InfoBarSeverity.Error); }
+        catch (UnauthorizedAccessException) { Report("File access denied.", InfoBarSeverity.Error); }
+        catch (System.Runtime.InteropServices.COMException) { Report("Close other dialogs, then try again.", InfoBarSeverity.Error); }
     }
     private void FeedbackMessage(string message, InfoBarSeverity severity = InfoBarSeverity.Informational)
     {
@@ -115,10 +115,10 @@ public sealed partial class MainWindow : Window
             if (_editorRow is not null && !_rows.Contains(_editorRow))
             {
                 _accountDialog.IsPrimaryButtonEnabled = false;
-                EditorError.Message = "This account was removed. Close this dialog to continue.";
+                EditorError.Message = "Account removed. Close this dialog.";
                 EditorError.IsOpen = true;
             }
-            if (snapshot.NetworkSuspended && !_networkSuspended) FeedbackMessage("Connectivity unavailable. New launches and automatic rejoins are waiting.", InfoBarSeverity.Warning);
+            if (snapshot.NetworkSuspended && !_networkSuspended) FeedbackMessage("No connection. Launches and rejoins paused.", InfoBarSeverity.Warning);
             _networkSuspended = snapshot.NetworkSuspended;
             var discord = await _api.GetAsync<DiscordView>("settings/discord");
             _discordReady = true;
@@ -132,12 +132,12 @@ public sealed partial class MainWindow : Window
                     bot.ConnectionState == "online" ? (byte)46 : bot.ConnectionState == "starting" ? (byte)202 : (byte)220,
                     bot.ConnectionState == "online" ? (byte)160 : bot.ConnectionState == "starting" ? (byte)155 : (byte)60,
                     bot.ConnectionState == "online" ? (byte)67 : bot.ConnectionState == "starting" ? (byte)30 : (byte)60));
-                BotToken.PlaceholderText = bot.Configured ? "Token saved" : "Paste a bot token";
+                BotToken.PlaceholderText = bot.Configured ? "Token saved" : "Bot token";
                 if (!_botLoaded) { BotEnabled.IsChecked = bot.Enabled; BotGuild.Text = bot.GuildId; BotUsers.Text = string.Join(", ", bot.AllowedUsers); _botLoaded = true; }
             }
-            DiscordStatus.Text = $"{(discord.Configured ? "Webhook saved" : "No webhook configured")} · {discord.DeliveryStatus}";
+            DiscordStatus.Text = $"{(discord.Configured ? "Webhook saved" : "No webhook saved")} · {discord.DeliveryStatus}";
             // The API returns only the configured flag; never put the saved secret into the UI.
-            WebhookInput.PlaceholderText = discord.Configured ? "●●●●●●●●●●●●●●●●" : "Paste a Discord webhook URL";
+            WebhookInput.PlaceholderText = discord.Configured ? "●●●●●●●●●●●●●●●●" : "Discord webhook URL";
             var fingerprint = JsonSerializer.Serialize(discord.Recent);
             if (fingerprint != _activityFingerprint)
             {
@@ -183,7 +183,7 @@ public sealed partial class MainWindow : Window
         finally { _updating = false; }
         EmptyState.Visibility = matches.Length == 0 ? Visibility.Visible : Visibility.Collapsed;
         EmptyTitle.Text = _rows.Count == 0 ? "No accounts yet" : "No matching accounts";
-        EmptyHint.Text = _rows.Count == 0 ? "Add your first account above to get started." : "Try another name or clear the filters.";
+        EmptyHint.Text = _rows.Count == 0 ? "Add an account above." : "Change search or clear filters.";
         UpdateSelectionSettings();
     }
     private async void AccountList_ItemClick(object sender, ItemClickEventArgs e)
@@ -203,7 +203,7 @@ public sealed partial class MainWindow : Window
         SelectAccounts.IsChecked = _visibleRows.Count > 0 && selected.Length == _visibleRows.Count;
         StartButton.IsEnabled = StopButton.IsEnabled = RestartButton.IsEnabled = RemoveButton.IsEnabled = selected.Length != 0;
         BulkEditButton.IsEnabled = selected.Length != 0;
-        AccountCount.Text = $"{_visibleRows.Count} of {_rows.Count} accounts · {selected.Length} selected · Ctrl+A to select visible";
+        AccountCount.Text = $"{_visibleRows.Count}/{_rows.Count} accounts · {selected.Length} selected";
         UpdatePresetControls();
     }
     private void Workspace_PointerPressed(object sender, PointerRoutedEventArgs e)
@@ -246,7 +246,7 @@ public sealed partial class MainWindow : Window
         DialogGame.SelectedItem = null;
         AliasInput.Text = _editorOriginal.Alias; PlaceInput.Text = _editorOriginal.Place;
         JobInput.Text = _editorOriginal.Job; PrivateInput.Text = _editorOriginal.Private;
-        DialogGame.SelectedItem = (object?)_gameProfiles.FirstOrDefault(p => p.Target == row.Account.Target) ?? "Custom destination";
+        DialogGame.SelectedItem = (object?)_gameProfiles.FirstOrDefault(p => p.Id == row.Account.GameProfileId && p.Target == row.Account.Target) ?? "Custom destination";
         DialogRejoin.IsChecked = row.Account.AutoRecovery;
         DialogGroup.Text = row.Account.Group;
         DialogFallback.SelectedIndex = PolicyIndex(row.Account.FallbackPolicy);
@@ -281,16 +281,17 @@ public sealed partial class MainWindow : Window
     {
         if (_saving || _editorRow is null || _editorOriginal is null) return false;
         if (!_rows.Contains(_editorRow))
-        { EditorError.Message = "This account was removed. Close this dialog to continue."; EditorError.IsOpen = true; return false; }
+        { EditorError.Message = "Account removed. Close this dialog."; EditorError.IsOpen = true; return false; }
         var draft = new EditorDraft { Alias = AliasInput.Text, Place = PlaceInput.Text, Job = JobInput.Text, Private = PrivateInput.Text };
         var patch = new Dictionary<string, object?>();
         if (draft.Alias != _editorOriginal.Alias) patch["alias"] = draft.Alias;
         if (DialogGame.SelectedItem is GameProfile profile)
         {
-            if (profile.Target != _editorRow.Account.Target) patch["target"] = profile.Target;
+            if (profile.Target != _editorRow.Account.Target || profile.Id != _editorRow.Account.GameProfileId)
+            { patch["target"] = profile.Target; patch["game_profile_id"] = profile.Id; }
         }
         else if (DialogClearTarget.IsChecked == true) patch["clear_target"] = true;
-        else if (draft.Place != _editorOriginal.Place || draft.Job != _editorOriginal.Job || draft.Private != _editorOriginal.Private)
+        else if (draft.Place != _editorOriginal.Place || draft.Job != _editorOriginal.Job || draft.Private != _editorOriginal.Private || _editorRow.Account.GameProfileId is not null)
         {
             if (!draft.TryTarget(out var target, out var error))
             { EditorError.Message = error; EditorError.IsOpen = true; return false; }
@@ -344,8 +345,8 @@ public sealed partial class MainWindow : Window
             var dialog = new ContentDialog
             {
                 XamlRoot = Root.XamlRoot, Title = accounts.Length == 1 ? "Delete account?" : $"Delete {accounts.Length} accounts?",
-                Content = accounts.Length == 1 ? $"Remove {accounts[0].Alias} ({accounts[0].Username}) from RoLauncher? Stop the account before deleting it."
-                    : "Remove the selected accounts from RoLauncher? Stop them before deleting. Running accounts cannot be removed.",
+                Content = accounts.Length == 1 ? $"Remove {accounts[0].Alias} ({accounts[0].Username})? Stop this account first."
+                    : "Remove selected accounts? Stop them first; running accounts cannot be removed.",
                 PrimaryButtonText = "Delete", CloseButtonText = "Cancel", DefaultButton = ContentDialogButton.Close, RequestedTheme = Root.ActualTheme
             };
             ApplyDialogTheme(dialog);
@@ -490,7 +491,7 @@ public sealed partial class MainWindow : Window
     }
     private async void Login_Click(object sender, RoutedEventArgs e)
     {
-        await GuardAsync(async () => { await _api.SendAsync(HttpMethod.Post, "login"); FeedbackMessage("Browser sign-in opened. Complete your Roblox login there."); });
+        await GuardAsync(async () => { await _api.SendAsync(HttpMethod.Post, "login"); FeedbackMessage("Sign in to Roblox in the opened browser."); });
     }
     private async void DiscordPreference_Click(object sender, RoutedEventArgs e)
     {
@@ -535,12 +536,12 @@ public sealed partial class MainWindow : Window
     }
     private async void WebhookTest_Click(object sender, RoutedEventArgs e)
     {
-        await GuardAsync(async () => { await _api.SendAsync(HttpMethod.Post, "settings/discord/test"); FeedbackMessage("Test queued. Check recent activity for delivery status."); });
+        await GuardAsync(async () => { await _api.SendAsync(HttpMethod.Post, "settings/discord/test"); FeedbackMessage("Test queued. See Recent activity for delivery."); });
         await RefreshAsync();
     }
     private async void WebhookRemove_Click(object sender, RoutedEventArgs e)
     {
-        await GuardAsync(async () => { await _api.SendAsync(HttpMethod.Patch, "settings/discord", new { webhook_url = "", enabled = false }); WebhookInput.Password = ""; FeedbackMessage("Webhook removed. Notifications are off."); });
+        await GuardAsync(async () => { await _api.SendAsync(HttpMethod.Patch, "settings/discord", new { webhook_url = "", enabled = false }); WebhookInput.Password = ""; FeedbackMessage("Webhook removed. Notifications off."); });
         await RefreshAsync();
     }
     private async void Token_Click(object sender, RoutedEventArgs e)

@@ -1,9 +1,26 @@
 # Local API reference
 
-Default address: `http://127.0.0.1:38471`. Open Settings → Support and integrations and click API token to obtain your token. All routes require `Authorization: Bearer TOKEN`. Browser Origin and cross-site requests are rejected. No endpoint exports account credentials. Keep the API token private.
+## Access
+
+- Base: `http://127.0.0.1:38471`.
+- Get the token from **Tools → Support → API token**; send `Authorization: Bearer TOKEN` on every route.
+- Browser Origin and cross-site requests are rejected. Endpoints never export account credentials; keep the token private.
+
+## Game joining
+
+- Status includes `server_selection` (`smart`, `lowest`, `highest`) and `join_type` (`friend`, `random`).
+- Preferences apply on future starts/rejoins. Smart uses reported ping/population; region and local latency are unavailable.
+- Selection scans at most 500 candidates within 30 seconds. Job IDs/private links take priority.
+- Assign saved games by PATCHing `game_profile_id` with matching `target`; stale/mismatched assignments fail atomically.
+- A custom target without an ID, or `clear_target`, clears the assignment. Omitted destinations preserve it.
+- Presets/backups retain assignments. Friend groups explicitly assigned accounts with equal saved destinations.
+- Presence comes from the joining account or managed peer's saved session and must match the place. Roblox enforces access/capacity.
+
+## Routes
 
 | Method | Route | Body / behavior |
 | --- | --- | --- |
+| PATCH | `/v1/settings/game` | `{ "server_selection": "smart" / "lowest" / "highest", "join_type": "friend" / "random" }`; both required, saved together, used on subsequent launches. |
 | GET | `/v1/status` | Accounts, saved game profiles, close preference, connectivity suspension, compatibility status |
 | POST | `/v1/login` | Open the isolated browser sign-in window; HTTP 202 means queued |
 | GET | `/v1/accounts` | Safe account/status records |
@@ -20,7 +37,7 @@ Default address: `http://127.0.0.1:38471`. Open Settings → Support and integra
 | POST | `/v1/accounts/USER_ID/repair` | Queue isolated sign-in requiring the same account ID |
 | GET / POST | `/v1/profiles` | List / save current settings for `name`, `account_ids`, optional existing `id` |
 | POST | `/v1/game-profiles` | Create/update `{id,name,game_name,thumbnail_url,target}`; UUID identifies the game profile, up to 100 |
-| DELETE | `/v1/game-profiles/UUID` | Delete saved game; account destinations remain unchanged |
+| DELETE | `/v1/game-profiles/UUID` | Delete saved game and clear assignments; retain account destinations |
 | GET | `/v1/games/PLACE_ID` | Authenticated Roblox game name and optional thumbnail lookup using a saved session |
 | PATCH | `/v1/settings/window` | Save `{ "close_to_tray": true }` or `false`; snapshots include `close_to_tray` |
 | POST | `/v1/profiles/import` | JSON array of credential-free profile definitions; atomic import |
@@ -38,26 +55,37 @@ Default address: `http://127.0.0.1:38471`. Open Settings → Support and integra
 | PATCH | `/v1/settings/discord` | Optional `enabled`, `notify_recovery`, `webhook_url`; empty URL removes it (also set `enabled:false`) |
 | POST | `/v1/settings/discord/test` | Queue a test to the saved webhook, even with notifications off; HTTP 202 means queued |
 
-Account IDs and Windows creation-time ticks are strings; PIDs are integers. A process record includes PID, creation time, tracker, and generation. Operations are session-local, with completed entries bounded to 1,000; account desired state is persisted. Target changes take effect at the next launch. Start/Stop are idempotent; conflicting pending Restart is rejected.
+## Records and operations
+
+- Account IDs and Windows creation ticks are strings; PIDs are integers.
+- Process records include PID, creation time, tracker, and generation.
+- Operations are session-local, capped at 1,000 completed entries; desired account state persists.
+- Target edits apply at the next launch. Start/Stop are idempotent; conflicting pending Restart is rejected.
 
 ```powershell
-
 $headers = @{ Authorization = 'Bearer YOUR_TOKEN' }
-
 Invoke-RestMethod 'http://127.0.0.1:38471/v1/accounts' -Headers $headers
-
 $target = @{ target = @{ place_id = 1818 }; auto_recovery = $true } | ConvertTo-Json
-
 Invoke-RestMethod 'http://127.0.0.1:38471/v1/accounts/USER_ID' -Method Patch -Headers $headers -ContentType 'application/json' -Body $target
-
 Invoke-RestMethod 'http://127.0.0.1:38471/v1/accounts/USER_ID/start' -Method Post -Headers $headers
-
 ```
 
+### Discord bot settings
+
+- `PATCH /v1/settings/discord` accepts `bot`: `enabled`, `token`, `guild_id`, `allowed_users` (user ID strings).
+- Omitted fields retain values; an empty token removes it. Enabling requires token, server ID, and a nonempty allowlist.
+- GET returns configuration flags, guild/users, status, and `connection_state` (`online`, `starting`, `offline`); never the token.
+- Save does not start a stopped bot. POST `/v1/settings/discord/bot/start`, `/stop`, or `/restart` controls its saved connection.
+- Start/Restart persist startup intent. Stop retains credentials but clears that intent; disabling/removing also clears it.
+- `/status-register channel` saves channel/message/page and refreshes changed data every 15 seconds.
+- Re-registering reuses the message or replaces a deleted one. Commands are opt-in and use supervised Stop/Restart.
+- The same loopback authentication and origin protections apply.
+
+## Account timing
+
+- `running_since`: UTC start of the managed run; null before confirmed connection or after Stop/manual Restart.
+- Disconnects and automatic rejoins retain it.
+- `longest_streak_seconds`: saved best elapsed run; display the maximum of this and the current run.
+- Both fields survive app restarts.
+
 [Back to README](../README.md)
-
-### Discord bot settings (upcoming 1.5.0)
-
-`PATCH /v1/settings/discord` accepts an optional `bot` object with `enabled`, `token`, `guild_id` and `allowed_users` (array of Discord user ID strings). Omitted fields retain saved values. An empty token removes it. Enabling requires a token, server ID and nonempty allowlist. GET returns bot enabled/configured flags, guild ID, allowed user IDs and connection status plus `connection_state` (`online`, `starting`, `offline`), never the token. Saving does not start a stopped bot. `POST /v1/settings/discord/bot/start`, `/stop`, and `/restart` control the connection using saved settings; Stop retains credentials. The bot resumes on app launch if it was previously started; an explicit Stop keeps it offline until started again. `/status-register channel` persists a channel/message/page registration and updates the same message when account data changes, checked every 15 seconds. Re-registering the same channel reuses the message (or replaces a deleted one). The same loopback authentication/origin protections apply. Commands are opt-in and use the existing supervised Stop/Restart operations.
-
-Account timing: `running_since` is the UTC start of the current managed run, or null before a confirmed connection and after Stop/manual Restart. Disconnects and automatic rejoins retain it. `longest_streak_seconds` stores the best elapsed run duration; clients display the maximum of this value and the current run. Both fields persist across app restarts. Discord bot Start/Restart persist the intent to run on the next app launch; Stop or disabling/removing the bot clears it.

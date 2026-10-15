@@ -24,11 +24,30 @@ pub enum FallbackPolicy {
     Pause,
 }
 
+#[derive(Clone, Copy, Debug, Default, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum ServerSelection {
+    #[default]
+    Smart,
+    Lowest,
+    Highest,
+}
+
+#[derive(Clone, Copy, Debug, Default, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum JoinType {
+    Friend,
+    #[default]
+    Random,
+}
+
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct ProfileEntry {
     pub account_id: String,
     pub alias: String,
     pub target: Option<Target>,
+    #[serde(default)]
+    pub game_profile_id: Option<Uuid>,
     pub auto_recovery: bool,
     pub fallback_policy: FallbackPolicy,
     pub group: String,
@@ -167,6 +186,8 @@ pub struct Account {
     pub username: String,
     pub alias: String,
     pub target: Option<Target>,
+    #[serde(default)]
+    pub game_profile_id: Option<Uuid>,
     pub desired_running: bool,
     pub auto_recovery: bool,
     pub status: Status,
@@ -204,6 +225,7 @@ impl Account {
             username,
             id,
             target: None,
+            game_profile_id: None,
             desired_running: false,
             auto_recovery: true,
             status: Status::Stopped,
@@ -265,6 +287,10 @@ pub struct SavedAccount {
 #[derive(Clone, Default, Serialize, Deserialize)]
 pub struct Database {
     #[serde(default)]
+    pub server_selection: ServerSelection,
+    #[serde(default)]
+    pub join_type: JoinType,
+    #[serde(default)]
     pub game_profiles: Vec<GameProfile>,
     #[serde(default = "default_close_to_tray")]
     pub close_to_tray: bool,
@@ -312,6 +338,8 @@ pub struct Operation {
 
 #[derive(Clone, Debug, Serialize)]
 pub struct Snapshot {
+    pub server_selection: ServerSelection,
+    pub join_type: JoinType,
     pub game_profiles: Vec<GameProfile>,
     pub close_to_tray: bool,
     pub accounts: Vec<Account>,

@@ -1,81 +1,199 @@
 # Changelog
 
-## [1.6.0] — Unreleased
+Newest first; local builds use unique dev suffixes.
+1.0.0 was first public stable; earlier builds were local, and 1.1.0 was a Linux beta.
+[Validation and limits](docs/VALIDATION.md).
 
-- Add gentle fade/slide transitions when changing sidebar pages, with interruptible motion and support for Windows' reduced-motion setting. Clicking the current page preserves its scroll position.
-- Add a neutral Windows Mica workspace, layered cards, consistent modal/dialog styling, and a sliding sidebar selection pill with a visible active-page marker. Keep system, light and dark appearance, with solid high-contrast fallbacks.
-- Use native Windows fonts and bundled Inter typography on Linux across pages, controls and dialogs.
-- Fix cropped Roblox instance screenshots on scaled high-resolution displays. Capture physical client dimensions on each request and skip frames resized during capture.
-
-## [1.5.0] — 2026-10-08
-
-- Add Discord Stop/Restart slash commands, username autocomplete and /status-register for a saved status message that updates automatically, restricted to configured server/users. Separate Save, Start, Stop and Restart controls retain bot credentials, with a colored connection status. The bot resumes on app launch if it was previously started; Stop keeps it off until started again.
-- Show current running time and saved longest online streak on each account row, plus the longest streak and account on Dashboard. Disconnects and automatic rejoins count toward a run; Stop or manual Restart ends it.
-- Open account and game editors by clicking rows/cards; select bulk accounts with a dedicated checkbox column and highlight game cards on hover.
-- Suppress transient redirect and clean-exit alerts; include game names, detected errors and available instance screenshots.
-- Explicitly isolate Sober HOME inside Flatpak and read owned logs through process descriptors. Native Arch/KDE validation remains pending.
-
-## [1.4.0] — 2026-10-07
-
-### Fixed
-
-- Starting RoLauncher while a Roblox client is open no longer permanently disables launching. Close existing clients yourself, then retry Start without restarting RoLauncher.
+## [1.7.0] — 2026-10-15
 
 ### Added
 
-- System, Light, and Dark themes with a saved appearance preference.
-- Game names in the account table, with Place ID shown when a name is unavailable.
-- Start, Stop, and Restart buttons for each account, independent of the table selection.
-- Paste multiple session cookies at once, one per line; blank lines and duplicate cookies are ignored.
+- Choose Smart/Lowest/Highest public-server selection; reported ping cannot guarantee region or local latency.
+- Choose Friend for managed accounts with the same saved game/destination, using the peer’s session for hidden presence, or Random for independent selection.
+- Persist game assignments across edits, presets, backups, and restarts; existing accounts must select their saved game again.
+- Save preferences for future starts/rejoins, with Job IDs/private links taking priority; Roblox enforces access/capacity and unavailable peers use retry/attention.
+
+### Fixed
+
+- Recover failed HTTP joins, including timeout/Join Error 529 stuck at Unknown; retain reconnect grace, retry limits, and rejoin settings.
+
+## [1.6.0] — 2026-10-09
 
 ### Changed
 
-- Settings are organized into dedicated sidebar pages for general preferences, account presets, Discord notifications, backups, updates, and Support and integrations.
-- Dashboard highlights account status distribution, automatic rejoin coverage, network and destination status, and accounts needing attention.
-- Account presets have separate use and creation sections, a single Choose accounts button that opens a searchable account table in a modal, with group, status and rejoin filters, and a preview of the saved accounts. Choices persist across filters; confirm to use them or cancel to discard changes.
-- Automatic rejoin is managed in individual or bulk account settings; the separate control in Settings is removed.
-- The account table expands to use wide windows and scrolls horizontally in smaller windows. Clicking empty workspace space clears the selection.
-- Cookie import is visible alongside browser sign-in instead of hidden in an expander.
-- Choosing a saved game locks its destination fields; choose Custom destination to edit them manually.
+- Add page transitions and sliding sidebar highlight; preserve current-page scroll and honor reduced motion.
+- Refresh Mica workspace, layered cards, and dialogs; retain theme, transparency, and high-contrast support.
+- Use native Windows typography and bundled Inter on Linux.
+
+### Fixed
+
+- Capture full physical client dimensions on scaled Windows displays; handle monitor moves and skip frames resized during capture.
+
+## [1.5.0] — 2026-10-08
+
+### Added
+
+- Discord Stop/Restart, username autocomplete, and automatically refreshed status messages; restrict access to configured server/users.
+- Separate bot Save from Start/Stop/Restart and show connection status; resume previously started bots unless explicitly stopped.
+- Show current runs and saved longest streaks on accounts/Dashboard; automatic rejoins retain runs, Stop/manual Restart ends them.
+
+### Changed
+
+- Click account rows/game cards to edit; select bulk accounts with checkboxes.
+- Suppress short-redirect and clean-exit alert noise; include error details, game links, and affected-window screenshots when available.
+
+### Fixed
+
+- Forward Sober HOME inside Flatpak and read verified logs across mount namespaces; native KDE validation remains pending.
+
+## [1.4.0] — 2026-10-07
+
+### Added
+
+- Saved System/Light/Dark theme, game names with Place ID fallback, and per-row Start/Stop/Restart.
+- Import multiple cookies beside sign-in; ignore blanks/duplicates.
+
+### Changed
+
+- Dedicated settings pages and Dashboard status/rejoin/connectivity/attention summaries.
+- Separate preset use/creation with searchable account lookup, persistent filtered selection, and confirm/cancel.
+- Move rejoin to individual/bulk editors; lock saved-game destinations until Custom destination is chosen.
+- Fill wide windows, scroll narrow tables, and clear selection on empty-space clicks.
+
+### Fixed
+
+- After startup with Roblox already open, close those clients and retry Start without restarting RoLauncher.
 
 ## [1.3.0] — 2026-10-06
 
-- Sidebar navigation for Accounts, Games, Dashboard, and Settings; secondary actions move into menus and expanders.
-- Saved game profiles include a profile name, Roblox game name, thumbnail, and public, specific, or private-server destination. Create, edit, delete, and choose a saved game in single or bulk account settings.
-- Read-only Dashboard with account counts, 24-hour event trends, persistent history, and recent activity moved from Settings. Recovery actions live in Accounts.
-- Changelog opens from the icon beside the version, shows the latest two versions, and links to the full GitHub changelog.
-- Settings renames Recovery & Access to Auto Rejoin and saves the close-to-tray or close-completely preference. The header Exit button is removed.
-- Page changes reset scrolling; account row actions resolve the clicked account explicitly; Ctrl+A uses the shared keyboard accelerator without overriding text selection.
-- Every isolated Sober launch grants input-device access, including retries, so a host Flatpak override is no longer required for that permission.
+### Added
+
+- Sidebar navigation and saved games with names, thumbnails, public/private/Job ID targets, individual/bulk selection, and encrypted backup support.
+- Read-only Dashboard counts, 24-hour trends, persistent history, and recent activity; recovery actions remain in Accounts.
+- Version-icon changelog showing two releases plus full-history link; saved tray/exit preference.
+
+### Changed
+
+- Rename Recovery & Access to Auto Rejoin; remove header Exit.
+
+### Fixed
+
+- Reset page scroll, target clicked-row actions correctly, and preserve text selection with Ctrl+A.
+- Grant Sober input access on every isolated launch/retry; requires Flatpak 1.15.6+.
 
 ## [1.2.1] — 2026-10-06
 
-- Center the update banner's Download, Cancel download and Relaunch button vertically with balanced spacing.
+### Fixed
+
+- Center update-banner Download/Cancel download/Relaunch buttons on Windows and Linux.
 
 ## [1.2.0] — 2026-10-06
 
-- Match the account group dropdown height to its adjacent action buttons.
-- Add a saved "Include beta updates" setting, beta release discovery and validated beta downloads; stable updates remain the default.
-- Integrate private Flatpak runtime/IPC isolation into every Linux launch and retry, with separate saved state per account; no adapter installation or environment variable is needed. Simultaneous games remain unverified.
-- Accept a Sober log inherited by helpers in the same verified sandbox; continue rejecting logs shared across sandboxes and ambiguous ownership.
-- Discover logs immediately after verifying a launched PID and include safe log-availability counts in compatibility diagnostics.
-- Include the Linux preview package alongside the stable Windows release; concurrent Roblox games and complete Linux parity remain unverified.
+### Added
 
-## [1.1.0] — 2026-10-06
+- Saved beta-update opt-in, off by default, with labeled banners and verified publisher/checksums.
+- Built-in per-account Flatpak runtime/IPC isolation for launches/retries; no adapter needed.
+- Linux preview alongside stable Windows; concurrent games and full parity remain unverified.
 
-- Add a Linux development port for Sober with shared WinUI views rendered by Uno.
-- Keep native WinUI on Windows; add Linux credential, sign-in, process and desktop adapters.
-- Linux support remains preview until the Ubuntu/Arch, GNOME/KDE parity matrix passes.
+### Fixed
+
+- Discover Sober logs immediately and accept inherited logs within one verified sandbox; ambiguity stays Unknown and diagnostics expose no credentials.
+- Match account group dropdown and button heights.
+
+## [1.1.0] — 2026-10-06 (beta)
+
+### Added
+
+- Linux/Sober preview using shared Uno layouts; Windows retains WinUI.
+- Linux encrypted credentials, browser login, process/log monitoring, desktop integration, and verified archive updates.
+- Native Ubuntu/Arch GNOME/KDE parity and live-player checks remain incomplete; credentials/backups are OS/user specific, requiring sign-in again.
 
 ## [1.0.0] — 2026-10-06
 
-- Renamed the product and Windows app to RoLauncher, retaining existing accounts and encrypted backups.
-- Added the launch-arrow app, tray and installer icon selected by the owner.
-- Added a per-user Windows `.exe` installer with shortcuts and uninstall support.
-- Check the official GitHub repository automatically at startup and every six hours. Download a verified installer, then press Relaunch to back up data, install and reopen automatically. Roblox clients stay open.
-- Added groups, atomic bulk editing, saved launch profiles, recovery policies, persistent history, support reports and encrypted backups.
-- Kept legacy accounts available when an update download creates the new data folder before migration.
-- Simplified the README and separated the user guide, API reference and build instructions.
-- Added reviewed `feature/* -> dev -> main` delivery, Windows CI, versioned release notes, corresponding source, license notices and SHA256 checksums.
+### Added
 
-The first public GitHub release remains 1.0.0 at the owner's explicit request. Earlier local packages are retained. See `docs/VALIDATION.md` for test coverage and live-integration limitations.
+- Per-user Windows installer, shortcuts, uninstall, and portable package.
+- Startup/six-hour update checks; verified Download → Relaunch backs up data and keeps Roblox open.
+- Groups, atomic bulk edits, and saved account profiles with review/apply/launch/import/export/management.
+- Recovery reasons/countdowns, eligible retry, sign-in repair, and public/stay/pause fallback policies.
+- Persistent filtered history, sanitized reports, ten encrypted backups, and offline corruption recovery.
+- CI release packages with source, notices, AGENTS.md, and SHA256 checksums.
+
+### Changed
+
+- RoLauncher name/icon; preserve legacy accounts/backups.
+- Separate usage/API/build guides from README.
+
+### Fixed
+
+- Keep legacy data accessible when update downloads create the new data folder.
+
+## [0.7.0] — 2026-10-05 (local development)
+
+### Changed
+
+- Top-center toasts preserve layout and close after five seconds/dismissal; new actions reset the timer, while repeated background warnings do not.
+
+## [0.6.1] — 2026-10-05 (local development)
+
+### Fixed
+
+- Match status/rejoin filter heights to search and Clear controls.
+
+## [0.6.0] — 2026-10-05 (local development)
+
+### Added
+
+- Account dialog with Save/Cancel replaces autosave; add search, status/rejoin filters, and row edit/delete.
+
+### Changed
+
+- Bulk actions affect selected visible accounts; confirm deletion.
+
+## [0.5.0] — 2026-10-05 (local development)
+
+### Changed
+
+- WinUI 3 desktop with native controls, cards, badges, and editing; retain login/accounts/Discord/tray and bundle the runtime.
+
+## [0.4.0] — 2026-10-05 (local development)
+
+### Added
+
+- Optional Discord webhook alerts for disconnects/exits/attention and recovery; encrypted settings, test delivery, and local activity.
+
+## [0.3.0] — 2026-10-05 (local development)
+
+### Added
+
+- Accounts/Settings/Changelog tabs, bulk account actions/rejoin, Ctrl+A selection, and valid-edit autosave.
+
+## [0.2.0] — 2026-10-05 (local development)
+
+### Changed
+
+- Recognize more kick/disconnect/failed-join logs; confirmed reconnection cancels recovery during 30-second grace.
+
+## [0.1.4] — 2026-10-05 (local development)
+
+### Fixed
+
+- Recognize error 279 and wait through reconnect grace; ignore unrelated timeouts and avoid public fallback on connection failure alone.
+
+## [0.1.3] — 2026-10-05 (local development)
+
+### Fixed
+
+- Avoid false Windows error 5 when clients exit during closure; resume recovery while retaining genuine access/authentication errors.
+
+## [0.1.2] — 2026-10-05 (local development)
+
+### Fixed
+
+- Fix ticket requests/current-client discovery, redact request secrets, and include WebView2 loader.
+
+## [0.1.0] — Local development
+
+### Added
+
+- Native Windows account launcher with encrypted sessions and local API.

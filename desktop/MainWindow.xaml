@@ -31,7 +31,6 @@
       <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
       <StackPanel Spacing="4">
         <TextBlock Text="RoLauncher" FontSize="28" FontWeight="SemiBold" Foreground="{ThemeResource InkBrush}"/>
-        <TextBlock Text="Your accounts. One workspace." Foreground="{ThemeResource MutedBrush}"/>
       </StackPanel>
       <TextBlock x:Name="VersionLabel" Grid.Column="1" VerticalAlignment="Center" Style="{StaticResource Caption}"/>
       <Button Grid.Column="2" Click="Changelog_Click" VerticalAlignment="Center" ToolTipService.ToolTip="What’s new" AutomationProperties.Name="What’s new"><FontIcon Glyph="&#xE946;"/></Button>
@@ -86,14 +85,14 @@
               <FontIcon Glyph="&#xE713;" FontSize="16"/><TextBlock Grid.Column="1" Text="General" FontSize="13" VerticalAlignment="Center" TextWrapping="Wrap"/>
             </Grid>
           </ToggleButton>
-          <ToggleButton x:Name="DiscordTab" Tag="7" Click="Tab_Click" HorizontalAlignment="Stretch" HorizontalContentAlignment="Stretch" Padding="10,11" BorderThickness="3,0,0,0" CornerRadius="12" AutomationProperties.Name="Discord notifications">
+          <ToggleButton x:Name="DiscordTab" Tag="7" Click="Tab_Click" HorizontalAlignment="Stretch" HorizontalContentAlignment="Stretch" Padding="10,11" BorderThickness="3,0,0,0" CornerRadius="12" AutomationProperties.Name="Discord">
             <Grid ColumnSpacing="12"><Grid.ColumnDefinitions><ColumnDefinition Width="20"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
-              <FontIcon Glyph="&#xE8F2;" FontSize="16"/><TextBlock Grid.Column="1" Text="Discord notifications" FontSize="13" VerticalAlignment="Center" TextWrapping="Wrap"/>
+              <FontIcon Glyph="&#xE8F2;" FontSize="16"/><TextBlock Grid.Column="1" Text="Discord" FontSize="13" VerticalAlignment="Center" TextWrapping="Wrap"/>
             </Grid>
           </ToggleButton>
-          <ToggleButton x:Name="BackupsTab" Tag="8" Click="Tab_Click" HorizontalAlignment="Stretch" HorizontalContentAlignment="Stretch" Padding="10,11" BorderThickness="3,0,0,0" CornerRadius="12" AutomationProperties.Name="Backup and restore">
+          <ToggleButton x:Name="BackupsTab" Tag="8" Click="Tab_Click" HorizontalAlignment="Stretch" HorizontalContentAlignment="Stretch" Padding="10,11" BorderThickness="3,0,0,0" CornerRadius="12" AutomationProperties.Name="Backups">
             <Grid ColumnSpacing="12"><Grid.ColumnDefinitions><ColumnDefinition Width="20"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
-              <FontIcon Glyph="&#xE8F1;" FontSize="16"/><TextBlock Grid.Column="1" Text="Backup and restore" FontSize="13" VerticalAlignment="Center" TextWrapping="Wrap"/>
+              <FontIcon Glyph="&#xE8F1;" FontSize="16"/><TextBlock Grid.Column="1" Text="Backups" FontSize="13" VerticalAlignment="Center" TextWrapping="Wrap"/>
             </Grid>
           </ToggleButton>
           <ToggleButton x:Name="UpdatesTab" Tag="9" Click="Tab_Click" HorizontalAlignment="Stretch" HorizontalContentAlignment="Stretch" Padding="10,11" BorderThickness="3,0,0,0" CornerRadius="12" AutomationProperties.Name="Updates">
@@ -102,9 +101,9 @@
             </Grid>
           </ToggleButton>
           <TextBlock Text="TOOLS" Style="{StaticResource Caption}" FontWeight="SemiBold" Margin="12,16,0,8"/>
-          <ToggleButton x:Name="SupportTab" Tag="10" Click="Tab_Click" HorizontalAlignment="Stretch" HorizontalContentAlignment="Stretch" Padding="10,11" BorderThickness="3,0,0,0" CornerRadius="12" AutomationProperties.Name="Support and integrations">
+          <ToggleButton x:Name="SupportTab" Tag="10" Click="Tab_Click" HorizontalAlignment="Stretch" HorizontalContentAlignment="Stretch" Padding="10,11" BorderThickness="3,0,0,0" CornerRadius="12" AutomationProperties.Name="Support">
             <Grid ColumnSpacing="12"><Grid.ColumnDefinitions><ColumnDefinition Width="20"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
-              <FontIcon Glyph="&#xE90F;" FontSize="16"/><TextBlock Grid.Column="1" Text="Support and integrations" FontSize="13" VerticalAlignment="Center" TextWrapping="Wrap"/>
+              <FontIcon Glyph="&#xE90F;" FontSize="16"/><TextBlock Grid.Column="1" Text="Support" FontSize="13" VerticalAlignment="Center" TextWrapping="Wrap"/>
             </Grid>
           </ToggleButton>
           </StackPanel>
@@ -122,15 +121,15 @@
             <StackPanel Spacing="14">
               <Grid ColumnSpacing="16">
                 <Grid.ColumnDefinitions><ColumnDefinition Width="Auto"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
-                <TextBlock Text="Add an account" Style="{StaticResource SectionTitle}"/>
-                <TextBlock Grid.Column="1" Text="Sign in with your browser or import cookies, one per line." Style="{StaticResource Caption}" VerticalAlignment="Center"/>
+                <TextBlock Text="Add account" Style="{StaticResource SectionTitle}"/>
+                <TextBlock Grid.Column="1" Text="Sign in or import cookies." Style="{StaticResource Caption}" VerticalAlignment="Center"/>
               </Grid>
-              <TextBox x:Name="CookieInput" PlaceholderText="Paste session cookies here, one per line" AcceptsReturn="True" TextWrapping="NoWrap" MinHeight="80" MaxHeight="160" MaxLength="1048576" IsSpellCheckEnabled="False" IsTextPredictionEnabled="False" ScrollViewer.VerticalScrollBarVisibility="Auto" AutomationProperties.Name="Session cookies, one per line"/>
-              <TextBlock Text="Cookies are visible while pasting. The field clears when import starts." Style="{StaticResource Caption}"/>
+              <TextBox x:Name="CookieInput" PlaceholderText="Session cookies, one per line" AcceptsReturn="True" TextWrapping="NoWrap" MinHeight="80" MaxHeight="160" MaxLength="1048576" IsSpellCheckEnabled="False" IsTextPredictionEnabled="False" ScrollViewer.VerticalScrollBarVisibility="Auto" AutomationProperties.Name="Session cookies, one per line"/>
+              <TextBlock Text="Cookies are visible until import starts." Style="{StaticResource Caption}"/>
               <StackPanel Orientation="Horizontal" Spacing="8">
                 <Button x:Name="ImportButton" Content="Import cookies" Click="Import_Click"/>
                 <Button x:Name="FileButton" Content="Import file…" Click="File_Click"/>
-                <Button x:Name="LoginButton" Content="Browser sign-in" Style="{StaticResource AccentButtonStyle}" Click="Login_Click" Padding="18,9" CornerRadius="8"/>
+                <Button x:Name="LoginButton" Content="Sign in" Style="{StaticResource AccentButtonStyle}" Click="Login_Click" Padding="18,9" CornerRadius="8"/>
               </StackPanel>
             </StackPanel>
           </Border>
@@ -145,14 +144,14 @@
                   <Button Width="40" Height="40" Padding="0" ToolTipService.ToolTip="More actions" AutomationProperties.Name="More actions"><FontIcon Glyph="&#xE712;" FontSize="18"/><Button.Flyout><MenuFlyout>
                     <MenuFlyoutItem x:Name="RestartButton" Text="Restart selected" Tag="restart" Click="Action_Click" IsEnabled="False"/>
                     <MenuFlyoutItem x:Name="RemoveButton" Text="Remove selected" Foreground="{ThemeResource DangerBrush}" Loaded="DangerControl_Loaded" Tag="remove" Click="Action_Click" IsEnabled="False"/>
-                    <MenuFlyoutItem Text="Retry selected now" Tag="retry" Click="Action_Click"/>
+                    <MenuFlyoutItem Text="Retry selected" Tag="retry" Click="Action_Click"/>
                     <MenuFlyoutItem Text="Sign in again" Click="RepairSelected_Click"/>
                   </MenuFlyout></Button.Flyout></Button>
                 </StackPanel>
               </Grid>
               <Grid ColumnSpacing="12">
                 <Grid.ColumnDefinitions><ColumnDefinition Width="1.3*"/><ColumnDefinition Width="*"/><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
-                <TextBox x:Name="NameSearch" PlaceholderText="Search alias or username…" TextChanged="Filters_Changed" AutomationProperties.Name="Search accounts by name"/>
+                <TextBox x:Name="NameSearch" PlaceholderText="Search accounts…" TextChanged="Filters_Changed" AutomationProperties.Name="Search accounts by name"/>
                 <ComboBox x:Name="StatusFilter" Grid.Column="1" SelectedIndex="0" HorizontalAlignment="Stretch" VerticalAlignment="Stretch" VerticalContentAlignment="Center" SelectionChanged="Filters_Changed" AutomationProperties.Name="Filter accounts by status">
                   <ComboBoxItem Content="All statuses" Tag=""/><ComboBoxItem Content="Running" Tag="running"/><ComboBoxItem Content="Stopped" Tag="stopped"/>
                   <ComboBoxItem Content="Queued" Tag="queued"/><ComboBoxItem Content="Launching" Tag="launching"/><ComboBoxItem Content="Reconnecting" Tag="reconnecting"/>
@@ -172,7 +171,7 @@
                   <MenuFlyoutItem Text="Edit all accounts" Click="EditAll_Click"/>
                 </MenuFlyout></Button.Flyout></Button>
               </StackPanel>
-              <TextBlock Text="Set automatic rejoin in an account’s settings (click its row). For several accounts, search or filter, select them, then choose Edit selected." Style="{StaticResource Caption}" TextWrapping="Wrap"/>
+              <TextBlock Text="Click a row to edit. Use checkboxes for bulk actions." Style="{StaticResource Caption}" TextWrapping="Wrap"/>
               <ScrollViewer x:Name="AccountTableScroll" SizeChanged="AccountTable_SizeChanged" HorizontalContentAlignment="Stretch" HorizontalScrollBarVisibility="Auto" HorizontalScrollMode="Enabled" VerticalScrollBarVisibility="Disabled" VerticalScrollMode="Disabled">
               <StackPanel x:Name="AccountTable" MinWidth="1220" HorizontalAlignment="Stretch" Spacing="8">
               <Grid Background="{ThemeResource TableHeaderBrush}" Padding="12,10" CornerRadius="6" ColumnSpacing="12">
@@ -201,12 +200,12 @@
                         <TextBlock Grid.Column="5" Text="{Binding Failures}" VerticalAlignment="Center" Foreground="{ThemeResource MutedBrush}"/>
                         <TextBlock Grid.Column="6" Text="{Binding Rejoin}" VerticalAlignment="Center" Foreground="{ThemeResource MutedBrush}"/>
                         <TextBlock Grid.Column="7" Text="{Binding Error}" VerticalAlignment="Center" Foreground="{ThemeResource MutedBrush}" TextTrimming="CharacterEllipsis" ToolTipService.ToolTip="{Binding Error}"/>
-                        <TextBlock Grid.Column="8" Text="{Binding RunningTime}" VerticalAlignment="Center" ToolTipService.ToolTip="Time since first connection; includes disconnects and automatic rejoins"/><TextBlock Grid.Column="9" Text="{Binding LongestOnline}" VerticalAlignment="Center" ToolTipService.ToolTip="Longest saved run, including disconnects and automatic rejoins"/>
+                        <TextBlock Grid.Column="8" Text="{Binding RunningTime}" VerticalAlignment="Center" ToolTipService.ToolTip="Since first connection, including rejoins"/><TextBlock Grid.Column="9" Text="{Binding LongestOnline}" VerticalAlignment="Center" ToolTipService.ToolTip="Longest run, including rejoins"/>
                         <StackPanel Grid.Column="10" Orientation="Horizontal" Spacing="4" VerticalAlignment="Center">
                           <Button x:Name="RowStartButton" Width="30" Height="34" Padding="0" Background="Transparent" BorderThickness="0" Tag="start" Click="RowAction_Click" ToolTipService.ToolTip="Start this account" AutomationProperties.Name="Start this account"><FontIcon Glyph="&#xE768;" FontSize="14"/></Button>
                           <Button x:Name="RowStopButton" Width="30" Height="34" Padding="0" Background="Transparent" BorderThickness="0" Tag="stop" Click="RowAction_Click" ToolTipService.ToolTip="Stop this account" AutomationProperties.Name="Stop this account"><FontIcon Glyph="&#xE71A;" FontSize="14"/></Button>
                           <Button x:Name="RowRestartButton" Width="30" Height="34" Padding="0" Background="Transparent" BorderThickness="0" Tag="restart" Click="RowAction_Click" ToolTipService.ToolTip="Restart this account" AutomationProperties.Name="Restart this account"><FontIcon Glyph="&#xE777;" FontSize="14"/></Button>
-                          <Button x:Name="RowDetailsButton" Width="30" Height="34" Padding="0" Background="Transparent" BorderThickness="0" Tag="{Binding Id}" Click="RowDetails_Click" ToolTipService.ToolTip="View / edit account" AutomationProperties.Name="View or edit account details"><FontIcon Glyph="&#xE70F;" FontSize="16"/></Button>
+                          <Button x:Name="RowDetailsButton" Width="30" Height="34" Padding="0" Background="Transparent" BorderThickness="0" Tag="{Binding Id}" Click="RowDetails_Click" ToolTipService.ToolTip="Edit account" AutomationProperties.Name="View or edit account details"><FontIcon Glyph="&#xE70F;" FontSize="16"/></Button>
                           <Button Width="30" Height="34" Padding="0" Background="Transparent" BorderThickness="0" Tag="{Binding Id}" Click="RowDelete_Click" Foreground="{ThemeResource DangerBrush}" Loaded="DangerControl_Loaded" ToolTipService.ToolTip="Delete account" AutomationProperties.Name="Delete account"><FontIcon Glyph="&#xE74D;" FontSize="16" Foreground="{ThemeResource DangerBrush}"/></Button>
                         </StackPanel>
                       </Grid>
@@ -216,7 +215,7 @@
                 <StackPanel x:Name="EmptyState" HorizontalAlignment="Center" VerticalAlignment="Center" Spacing="8">
                   <FontIcon Glyph="&#xE77B;" FontSize="28" Foreground="{ThemeResource MutedBrush}"/>
                   <TextBlock x:Name="EmptyTitle" Text="No accounts yet" FontWeight="SemiBold" HorizontalAlignment="Center"/>
-                  <TextBlock x:Name="EmptyHint" Text="Add your first account above to get started." Style="{StaticResource Caption}"/>
+                  <TextBlock x:Name="EmptyHint" Text="Add an account above." Style="{StaticResource Caption}"/>
                 </StackPanel>
               </Grid>
               </StackPanel>
@@ -232,11 +231,10 @@
             <Border Grid.Column="2" Style="{StaticResource Card}"><StackPanel Spacing="8"><TextBlock Text="Rejoining" Style="{StaticResource Caption}"/><TextBlock x:Name="RejoiningMetric" FontSize="32" FontWeight="SemiBold"/><TextBlock x:Name="RejoiningHint" Style="{StaticResource Caption}"/></StackPanel></Border>
             <Border Grid.Column="3" Style="{StaticResource Card}"><StackPanel Spacing="8"><TextBlock Text="Needs attention" Style="{StaticResource Caption}"/><TextBlock x:Name="AttentionMetric" FontSize="32" FontWeight="SemiBold"/><TextBlock x:Name="AttentionHint" Style="{StaticResource Caption}"/></StackPanel></Border>
           </Grid>
-          <Border Style="{StaticResource Card}"><StackPanel Spacing="8"><TextBlock Text="Longest streak" Style="{StaticResource Caption}"/><TextBlock x:Name="LongestStreakMetric" FontSize="32" FontWeight="SemiBold"/><TextBlock x:Name="LongestStreakHint" Style="{StaticResource Caption}" TextWrapping="Wrap"/><TextBlock Text="Saved across app restarts · includes disconnects and automatic rejoins · ends on Stop or manual Restart" Style="{StaticResource Caption}" TextWrapping="Wrap"/></StackPanel></Border>
+          <Border Style="{StaticResource Card}"><StackPanel Spacing="8"><TextBlock Text="Longest streak" Style="{StaticResource Caption}"/><TextBlock x:Name="LongestStreakMetric" FontSize="32" FontWeight="SemiBold"/><TextBlock x:Name="LongestStreakHint" Style="{StaticResource Caption}" TextWrapping="Wrap"/><TextBlock Text="Includes rejoins; ends on Stop or manual Restart. Saved across restarts." Style="{StaticResource Caption}" TextWrapping="Wrap"/></StackPanel></Border>
           <Grid ColumnSpacing="16"><Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
             <Border Style="{StaticResource Card}"><StackPanel Spacing="12">
               <TextBlock Text="Account status" Style="{StaticResource SectionTitle}"/>
-              <TextBlock Text="Live distribution across all saved accounts" Style="{StaticResource Caption}"/>
               <StackPanel x:Name="StatusBreakdown" Spacing="10"/>
             </StackPanel></Border>
             <Border Grid.Column="1" Style="{StaticResource Card}"><StackPanel Spacing="12">
@@ -250,14 +248,14 @@
           </Grid>
           <Border Style="{StaticResource Card}"><StackPanel Spacing="12">
             <Grid><Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions><TextBlock Text="Activity · last 24 hours" Style="{StaticResource SectionTitle}"/><TextBlock x:Name="TrendScope" Grid.Column="1" Style="{StaticResource Caption}"/></Grid>
-            <TextBlock Text="Recorded status events in 3-hour intervals" Style="{StaticResource Caption}"/>
+            <TextBlock Text="Events in 3-hour groups" Style="{StaticResource Caption}"/>
             <Grid x:Name="TrendBars" ColumnSpacing="12" Height="140"/>
             <TextBlock x:Name="TrendSummary" Style="{StaticResource Caption}"/>
           </StackPanel></Border>
           <Border Style="{StaticResource Card}"><StackPanel Spacing="12">
             <TextBlock Text="Needs your attention" Style="{StaticResource SectionTitle}"/>
             <TextBlock x:Name="AttentionSummary" Style="{StaticResource Caption}"/>
-            <TextBlock x:Name="AttentionEmpty" Text="No accounts need attention. Accounts waiting for automatic rejoin are handled by the supervisor." TextWrapping="Wrap"/>
+            <TextBlock x:Name="AttentionEmpty" Text="All clear. Automatic rejoins continue." TextWrapping="Wrap"/>
             <ItemsControl x:Name="RecoveryList"><ItemsControl.ItemTemplate><DataTemplate>
               <Border Padding="0,12" BorderBrush="{ThemeResource LineBrush}" BorderThickness="0,0,0,1"><StackPanel Spacing="6">
                 <Button Content="{Binding Alias}" Tag="{Binding Id}" Click="RowDetails_Click" HorizontalAlignment="Left" Padding="0" Background="Transparent" BorderThickness="0" FontWeight="SemiBold" ToolTipService.ToolTip="View or edit this account"/><TextBlock Text="{Binding Username}" Style="{StaticResource Caption}"/>
@@ -271,108 +269,114 @@
           <Expander Header="Integration status" HorizontalAlignment="Stretch"><TextBlock x:Name="CompatibilityText" TextWrapping="Wrap" Style="{StaticResource Caption}"/></Expander>
           <Border Style="{StaticResource Card}"><StackPanel Spacing="12">
             <TextBlock Text="Activity history" Style="{StaticResource SectionTitle}"/>
-            <TextBlock Text="Latest 1,000 events · retained across restarts" Style="{StaticResource Caption}"/>
+            <TextBlock Text="Last 1,000 events · saved across restarts" Style="{StaticResource Caption}"/>
             <StackPanel Orientation="Horizontal" Spacing="8"><ComboBox x:Name="HistoryAccount" MinWidth="200" PlaceholderText="All accounts" SelectionChanged="History_Changed"/></StackPanel>
             <StackPanel Orientation="Horizontal" Spacing="8"><Button x:Name="HistoryPrevious" Content="Newer" Tag="-1" Click="HistoryPage_Click"/><TextBlock x:Name="HistoryPageSummary" VerticalAlignment="Center"/><Button x:Name="HistoryNext" Content="Older" Tag="1" Click="HistoryPage_Click"/></StackPanel>
             <ItemsControl x:Name="HistoryList"><ItemsControl.ItemTemplate><DataTemplate><TextBlock Text="{Binding Summary}" TextWrapping="Wrap" Margin="0,6"/></DataTemplate></ItemsControl.ItemTemplate></ItemsControl>
           </StackPanel></Border>
           <Border Style="{StaticResource Card}">
-            <StackPanel Spacing="14"><TextBlock Text="Recent activity" Style="{StaticResource SectionTitle}"/><TextBlock Text="This session · newest first · includes alerts while Discord is off" Style="{StaticResource Caption}"/>
+            <StackPanel Spacing="14"><TextBlock Text="Recent activity" Style="{StaticResource SectionTitle}"/><TextBlock Text="This session · newest first" Style="{StaticResource Caption}"/>
               <TextBlock x:Name="ActivityEmpty" Text="No activity yet." Foreground="{ThemeResource MutedBrush}"/>
               <ItemsControl x:Name="ActivityList"><ItemsControl.ItemTemplate><DataTemplate><Border BorderBrush="{ThemeResource LineBrush}" BorderThickness="0,0,0,1" Padding="0,12"><StackPanel Spacing="4"><TextBlock Text="{Binding Title}" FontWeight="SemiBold"/><TextBlock Text="{Binding Account}" Style="{StaticResource Caption}"/><TextBlock Text="{Binding Message}" TextWrapping="Wrap"/><TextBlock Text="{Binding Timestamp}" Style="{StaticResource Caption}"/></StackPanel></Border></DataTemplate></ItemsControl.ItemTemplate></ItemsControl>
             </StackPanel>
           </Border>
         </StackPanel>
         <StackPanel x:Name="SettingsPage" Spacing="16" Visibility="Collapsed">
-          <TextBlock Text="Settings / General" FontSize="24" FontWeight="SemiBold" Margin="0,0,0,4"/>
-          <Border Style="{StaticResource Card}"><StackPanel Spacing="12"><TextBlock Text="Appearance" Style="{StaticResource SectionTitle}"/><ComboBox x:Name="ThemePicker" Header="Theme" HorizontalAlignment="Stretch" SelectionChanged="Theme_Changed"><ComboBoxItem Content="System"/><ComboBoxItem Content="Light"/><ComboBoxItem Content="Dark"/></ComboBox><TextBlock Text="System follows your device appearance. Your choice is saved automatically." Style="{StaticResource Caption}"/><TextBlock Text="Window" Style="{StaticResource SectionTitle}"/>
-            <ComboBox x:Name="CloseBehavior" Header="When I close RoLauncher" HorizontalAlignment="Stretch" SelectionChanged="CloseBehavior_Changed"><ComboBoxItem Content="Minimize to tray"/><ComboBoxItem Content="Close completely"/></ComboBox>
-            <TextBlock Text="Closing completely stops automatic rejoin and leaves game clients open. Without a tray host, minimize keeps the Linux window accessible." Style="{StaticResource Caption}" TextWrapping="Wrap"/>
+          <TextBlock Text="General" FontSize="24" FontWeight="SemiBold" Margin="0,0,0,4"/>
+          <Border Style="{StaticResource Card}"><StackPanel Spacing="12"><TextBlock Text="Appearance" Style="{StaticResource SectionTitle}"/><ComboBox x:Name="ThemePicker" Header="Theme" HorizontalAlignment="Stretch" SelectionChanged="Theme_Changed"><ComboBoxItem Content="System"/><ComboBoxItem Content="Light"/><ComboBoxItem Content="Dark"/></ComboBox><TextBlock Text="Saved automatically." Style="{StaticResource Caption}"/><TextBlock Text="Window" Style="{StaticResource SectionTitle}"/>
+            <ComboBox x:Name="CloseBehavior" Header="On close" HorizontalAlignment="Stretch" SelectionChanged="CloseBehavior_Changed"><ComboBoxItem Content="Minimize to tray"/><ComboBoxItem Content="Close completely"/></ComboBox>
+            <TextBlock Text="Exiting stops rejoin; games stay open. Linux minimizes without a tray host." Style="{StaticResource Caption}" TextWrapping="Wrap"/>
+          </StackPanel></Border>
+          <Border Style="{StaticResource Card}"><StackPanel Spacing="12">
+            <TextBlock Text="Game joining" Style="{StaticResource SectionTitle}"/>
+            <ComboBox x:Name="ServerSelector" Header="Server selector" HorizontalAlignment="Stretch" SelectionChanged="GameSettings_Changed"><ComboBoxItem Content="Smart"/><ComboBoxItem Content="Lowest"/><ComboBoxItem Content="Highest"/></ComboBox>
+            <TextBlock Text="Smart balances ping and player count; Lowest / Highest use player count. Region and local latency unavailable. Scans up to 500 servers; Job IDs and private links override." Style="{StaticResource Caption}" TextWrapping="Wrap"/>
+            <ComboBox x:Name="GameJoinType" Header="Join type" HorizontalAlignment="Stretch" SelectionChanged="GameSettings_Changed"><ComboBoxItem Content="Friend"/><ComboBoxItem Content="Random"/></ComboBox>
+            <TextBlock Text="Friend joins managed accounts on the same saved game. Select that game for each account; game access and free slots required. Managed peers can report their own server when friend presence is hidden. Random joins independently. Saved for future launches and rejoins." Style="{StaticResource Caption}" TextWrapping="Wrap"/>
           </StackPanel></Border>
         </StackPanel>
         <StackPanel x:Name="PresetsPage" Spacing="16" Visibility="Collapsed">
-          <TextBlock Text="Accounts / Account presets" FontSize="24" FontWeight="SemiBold" Margin="0,0,0,4"/>
-          <TextBlock Text="A preset remembers accounts and their destinations, rejoin settings, and groups. Use it to restore a setup or launch the same team again." Style="{StaticResource Caption}"/>
+          <TextBlock Text="Account presets" FontSize="24" FontWeight="SemiBold" Margin="0,0,0,4"/>
+          <TextBlock Text="Save accounts, destinations, rejoin, and groups for reuse." Style="{StaticResource Caption}"/>
           <Border Style="{StaticResource Card}"><StackPanel Spacing="12">
-            <TextBlock Text="Use a saved preset" Style="{StaticResource SectionTitle}"/>
+            <TextBlock Text="Use preset" Style="{StaticResource SectionTitle}"/>
             <ComboBox x:Name="ProfilePicker" Header="Preset" HorizontalAlignment="Stretch" PlaceholderText="Choose a preset" SelectionChanged="Profile_Changed"/>
-            <TextBlock x:Name="ProfileSummary" Text="No presets yet. Create your first one below." Style="{StaticResource Caption}"/>
-            <StackPanel Orientation="Horizontal" Spacing="8"><Button x:Name="LaunchPresetButton" Content="Review and launch" Style="{StaticResource PrimaryActionButtonStyle}" Click="LaunchProfile_Click" IsEnabled="False"/><Button x:Name="ApplyPresetButton" Style="{StaticResource ActionButtonStyle}" Content="Apply settings only" Click="ApplyProfile_Click" IsEnabled="False"/><Button Width="40" Height="40" Padding="0" ToolTipService.ToolTip="More actions" AutomationProperties.Name="More actions"><FontIcon Glyph="&#xE712;" FontSize="18"/><Button.Flyout><MenuFlyout><MenuFlyoutItem x:Name="ReplacePresetButton" Text="Replace with chosen accounts" Click="ReplaceProfile_Click" IsEnabled="False"/><MenuFlyoutItem x:Name="DeletePresetButton" Text="Delete preset" Foreground="{ThemeResource DangerBrush}" Loaded="DangerControl_Loaded" Click="DeleteProfile_Click" IsEnabled="False"/><MenuFlyoutSeparator/><MenuFlyoutItem Text="Export presets" Click="ExportProfiles_Click"/><MenuFlyoutItem Text="Import presets" Click="ImportProfiles_Click"/></MenuFlyout></Button.Flyout></Button></StackPanel>
+            <TextBlock x:Name="ProfileSummary" Text="No presets yet." Style="{StaticResource Caption}"/>
+            <StackPanel Orientation="Horizontal" Spacing="8"><Button x:Name="LaunchPresetButton" Content="Review &amp; launch" Style="{StaticResource PrimaryActionButtonStyle}" Click="LaunchProfile_Click" IsEnabled="False"/><Button x:Name="ApplyPresetButton" Style="{StaticResource ActionButtonStyle}" Content="Apply settings" Click="ApplyProfile_Click" IsEnabled="False"/><Button Width="40" Height="40" Padding="0" ToolTipService.ToolTip="More actions" AutomationProperties.Name="More actions"><FontIcon Glyph="&#xE712;" FontSize="18"/><Button.Flyout><MenuFlyout><MenuFlyoutItem x:Name="ReplacePresetButton" Text="Replace with selection" Click="ReplaceProfile_Click" IsEnabled="False"/><MenuFlyoutItem x:Name="DeletePresetButton" Text="Delete preset" Foreground="{ThemeResource DangerBrush}" Loaded="DangerControl_Loaded" Click="DeleteProfile_Click" IsEnabled="False"/><MenuFlyoutSeparator/><MenuFlyoutItem Text="Export presets" Click="ExportProfiles_Click"/><MenuFlyoutItem Text="Import presets" Click="ImportProfiles_Click"/></MenuFlyout></Button.Flyout></Button></StackPanel>
           </StackPanel></Border>
           <Border Style="{StaticResource Card}"><StackPanel Spacing="12">
-            <TextBlock Text="Create a preset" Style="{StaticResource SectionTitle}"/>
-            <TextBlock Text="1. Choose accounts. 2. Adjust their settings if needed. 3. Name and save the preset." Style="{StaticResource Caption}"/>
+            <TextBlock Text="Create preset" Style="{StaticResource SectionTitle}"/>
+            <TextBlock Text="Choose accounts, then name and save." Style="{StaticResource Caption}"/>
             <Button x:Name="ChoosePresetAccountsButton" Content="Choose accounts…" Click="ChoosePresetAccounts_Click" HorizontalAlignment="Left"/>
             <TextBlock x:Name="PresetSelectionSummary" Style="{StaticResource Caption}"/>
             <Button x:Name="PresetEditButton" Style="{StaticResource ActionButtonStyle}" Content="Edit chosen accounts" Click="BulkEdit_Click" HorizontalAlignment="Left" IsEnabled="False"/>
-            <TextBox x:Name="ProfileName" Header="Preset name" PlaceholderText="Example: Evening team" MaxLength="100" TextChanged="PresetName_Changed"/>
+            <TextBox x:Name="ProfileName" Header="Preset name" PlaceholderText="Evening team" MaxLength="100" TextChanged="PresetName_Changed"/>
             <Button x:Name="SavePresetButton" Content="Save preset" Style="{StaticResource PrimaryActionButtonStyle}" Click="SaveProfile_Click" HorizontalAlignment="Left" IsEnabled="False"/>
           </StackPanel></Border>
         </StackPanel>
         <StackPanel x:Name="BackupsPage" Spacing="16" Visibility="Collapsed">
-          <TextBlock Text="Settings / Backup and restore" FontSize="24" FontWeight="SemiBold" Margin="0,0,0,4"/>
+          <TextBlock Text="Backups" FontSize="24" FontWeight="SemiBold" Margin="0,0,0,4"/>
           <Border Style="{StaticResource Card}"><StackPanel Spacing="12">
-            <TextBlock Text="Backup and restore" Style="{StaticResource SectionTitle}"/>
-            <TextBlock x:Name="BackupDescription" Text="Ten encrypted local backups are kept. Restore works for this Windows user and leaves restored accounts stopped. Stop all accounts before restoring." Style="{StaticResource Caption}" TextWrapping="Wrap"/>
-            <ComboBox x:Name="BackupPicker" HorizontalAlignment="Stretch" PlaceholderText="Choose a local backup"/>
+            <TextBlock Text="Backups" Style="{StaticResource SectionTitle}"/>
+            <TextBlock x:Name="BackupDescription" Text="Keeps 10 encrypted backups for this OS user. Stop all accounts before restoring; restored accounts stay stopped." Style="{StaticResource Caption}" TextWrapping="Wrap"/>
+            <ComboBox x:Name="BackupPicker" HorizontalAlignment="Stretch" PlaceholderText="Choose backup"/>
             <StackPanel Orientation="Horizontal" Spacing="8"><Button Content="Create backup" Click="Backup_Click"/><Button Content="Restore backup" Click="Restore_Click"/></StackPanel>
           </StackPanel></Border>
         </StackPanel>
         <StackPanel x:Name="DiscordPage" Spacing="16" Visibility="Collapsed">
-          <TextBlock Text="Settings / Discord notifications" FontSize="24" FontWeight="SemiBold" Margin="0,0,0,4"/>
+          <TextBlock Text="Discord" FontSize="24" FontWeight="SemiBold" Margin="0,0,0,4"/>
           <Border Style="{StaticResource Card}">
             <StackPanel Spacing="14">
-              <TextBlock Text="Discord notifications" Style="{StaticResource SectionTitle}"/>
-              <TextBlock Text="Create a channel webhook in Discord → Integrations. These settings apply to all accounts." Style="{StaticResource Caption}"/>
-              <StackPanel Orientation="Horizontal" Spacing="24"><CheckBox x:Name="DiscordEnabled" Content="Enable notifications" Click="DiscordPreference_Click"/><CheckBox x:Name="DiscordRecovery" Content="Also notify for rejoin and back online" Click="DiscordPreference_Click"/></StackPanel>
-              <PasswordBox x:Name="WebhookInput" Header="Webhook URL · hidden" PlaceholderText="Paste a Discord webhook URL" PasswordRevealMode="Hidden" MaxLength="512"/>
-              <TextBlock Text="A saved webhook appears as dots. Enter a new URL to replace it, or leave it untouched to keep it." Style="{StaticResource Caption}"/>
+              <TextBlock Text="Discord" Style="{StaticResource SectionTitle}"/>
+              <TextBlock Text="Create a webhook in Discord / Integrations. Applies to all accounts." Style="{StaticResource Caption}"/>
+              <StackPanel Orientation="Horizontal" Spacing="24"><CheckBox x:Name="DiscordEnabled" Content="Enable notifications" Click="DiscordPreference_Click"/><CheckBox x:Name="DiscordRecovery" Content="Include rejoin and back online" Click="DiscordPreference_Click"/></StackPanel>
+              <PasswordBox x:Name="WebhookInput" Header="Webhook URL" PlaceholderText="Discord webhook URL" PasswordRevealMode="Hidden" MaxLength="512"/>
+              <TextBlock Text="Leave unchanged to keep the saved webhook." Style="{StaticResource Caption}"/>
               <StackPanel Orientation="Horizontal" Spacing="8"><Button Content="Save webhook" Click="WebhookSave_Click" Style="{StaticResource AccentButtonStyle}" Padding="18,9" CornerRadius="8"/><Button Content="Send test" Click="WebhookTest_Click"/><Button Content="Remove webhook" Style="{StaticResource DangerButtonStyle}" Loaded="DangerControl_Loaded" Click="WebhookRemove_Click"/></StackPanel>
-              <TextBlock x:Name="DiscordStatus" Text="No webhook configured." Style="{StaticResource Caption}"/>
-              <TextBlock Text="Error alerts attach the affected game window when capture is available. Closed, minimized, or protected windows may provide text only." Style="{StaticResource Caption}" TextWrapping="Wrap"/>
+              <TextBlock x:Name="DiscordStatus" Text="No webhook saved." Style="{StaticResource Caption}"/>
+              <TextBlock Text="Error alerts include a game screenshot when available." Style="{StaticResource Caption}" TextWrapping="Wrap"/>
               <TextBlock Text="Bot commands" Style="{StaticResource SectionTitle}" Margin="0,12,0,0"/>
-              <TextBlock Text="Create a Discord bot and install it in your server with bot and applications.commands scopes. Allow View Channel, Send Messages, and Embed Links. Only the user IDs below can use commands or account autocomplete." Style="{StaticResource Caption}" TextWrapping="Wrap"/>
+              <TextBlock Text="Install with bot and applications.commands scopes. Allow View Channel, Send Messages, and Embed Links. Only listed users can access commands and autocomplete." Style="{StaticResource Caption}" TextWrapping="Wrap"/>
               <CheckBox x:Name="BotEnabled" Content="Enable /action and /status-register"/>
-              <PasswordBox x:Name="BotToken" Header="Bot token · hidden (leave blank to keep saved token)" PasswordRevealMode="Hidden" MaxLength="256"/>
-              <TextBox x:Name="BotGuild" Header="Discord server ID" MaxLength="20"/>
-              <TextBox x:Name="BotUsers" Header="Allowed Discord user IDs · comma separated" MaxLength="2200"/>
-              <StackPanel Orientation="Horizontal" Spacing="8"><Button Content="Save commands" Click="BotSave_Click"/><Button Content="Start" Tag="start" Click="BotControl_Click"/><Button Content="Stop" Tag="stop" Click="BotControl_Click" Style="{StaticResource DangerButtonStyle}" Loaded="DangerControl_Loaded"/><Button Content="Restart" Tag="restart" Click="BotControl_Click"/><Button Content="Remove bot" Click="BotRemove_Click"/></StackPanel>
+              <PasswordBox x:Name="BotToken" Header="Bot token · blank keeps saved token" PasswordRevealMode="Hidden" MaxLength="256"/>
+              <TextBox x:Name="BotGuild" Header="Server ID" MaxLength="20"/>
+              <TextBox x:Name="BotUsers" Header="Allowed user IDs · comma separated" MaxLength="2200"/>
+              <StackPanel Orientation="Horizontal" Spacing="8"><Button Content="Save bot" Click="BotSave_Click"/><Button Content="Start" Tag="start" Click="BotControl_Click"/><Button Content="Stop" Tag="stop" Click="BotControl_Click" Style="{StaticResource DangerButtonStyle}" Loaded="DangerControl_Loaded"/><Button Content="Restart" Tag="restart" Click="BotControl_Click"/><Button Content="Remove bot" Click="BotRemove_Click"/></StackPanel>
               <TextBlock x:Name="BotConnection" Text="Offline" FontSize="12" Foreground="#DC3C3C"/>
-              <TextBlock Text="Save keeps your settings. Use Start or Restart to connect with saved settings." Style="{StaticResource Caption}" TextWrapping="Wrap"/>
+              <TextBlock Text="Save, then Start or Restart to connect." Style="{StaticResource Caption}" TextWrapping="Wrap"/>
               <TextBlock x:Name="BotStatus" Text="Commands disabled." Style="{StaticResource Caption}" TextWrapping="Wrap"/>
             </StackPanel>
           </Border>
         </StackPanel>
         <StackPanel x:Name="SupportPage" Spacing="16" Visibility="Collapsed">
-          <TextBlock Text="Tools / Support and integrations" FontSize="24" FontWeight="SemiBold" Margin="0,0,0,4"/>
+          <TextBlock Text="Support" FontSize="24" FontWeight="SemiBold" Margin="0,0,0,4"/>
           <Border Style="{StaticResource Card}"><StackPanel Spacing="16">
             <TextBlock Text="Support report" Style="{StaticResource SectionTitle}"/>
-            <TextBlock Text="Export diagnostics to help troubleshoot RoLauncher." Style="{StaticResource Caption}"/>
-            <Button Content="Export support report" Click="ExportDiagnostics_Click" HorizontalAlignment="Left"/>
+            <Button Content="Export report" Click="ExportDiagnostics_Click" HorizontalAlignment="Left"/>
           </StackPanel></Border>
           <Border Style="{StaticResource Card}"><StackPanel Spacing="16">
             <TextBlock Text="Local API" Style="{StaticResource SectionTitle}"/>
-            <TextBlock Text="Manage the token used by integrations to connect to RoLauncher." Style="{StaticResource Caption}"/>
-            <StackPanel Orientation="Horizontal" Spacing="12"><Button Content="API token" Click="Token_Click"/><HyperlinkButton Content="API reference on GitHub" NavigateUri="https://github.com/oangsa/RoLauncher/blob/main/docs/API.md" VerticalAlignment="Center"/></StackPanel>
+            <TextBlock Text="Connect integrations with an API token." Style="{StaticResource Caption}"/>
+            <StackPanel Orientation="Horizontal" Spacing="12"><Button Content="API token" Click="Token_Click"/><HyperlinkButton Content="API reference" NavigateUri="https://github.com/oangsa/RoLauncher/blob/main/docs/API.md" VerticalAlignment="Center"/></StackPanel>
           </StackPanel></Border>
         </StackPanel>
         <StackPanel x:Name="UpdatesPage" Spacing="16" Visibility="Collapsed">
-          <TextBlock Text="Settings / Updates" FontSize="24" FontWeight="SemiBold" Margin="0,0,0,4"/>
+          <TextBlock Text="Updates" FontSize="24" FontWeight="SemiBold" Margin="0,0,0,4"/>
           <Border Style="{StaticResource Card}"><StackPanel Spacing="12">
             <TextBlock Text="Updates" Style="{StaticResource SectionTitle}"/>
             <CheckBox x:Name="IncludeBetaUpdates" Content="Include beta updates" Checked="BetaUpdates_Changed" Unchecked="BetaUpdates_Changed"/>
-            <TextBlock Text="Beta versions include features that are still being tested. Turn this on to receive stable and beta releases." Style="{StaticResource Caption}"/>
-            <TextBlock Text="RoLauncher checks GitHub automatically on startup and every six hours. Download an available update, then choose Relaunch to install it. Your accounts and settings are backed up, and Roblox clients stay open." Style="{StaticResource Caption}" TextWrapping="Wrap"/>
+            <TextBlock Text="Receive features still being tested." Style="{StaticResource Caption}"/>
+            <TextBlock Text="Checks at startup and every 6 hours. Download, then Relaunch to install. Data is backed up; games stay open." Style="{StaticResource Caption}" TextWrapping="Wrap"/>
             <StackPanel Orientation="Horizontal" Spacing="8"><Button x:Name="CheckUpdatesButton" Content="Check updates" Click="CheckUpdates_Click"/><Button x:Name="UpdateDownloadButton" Content="Download" Click="UpdateAction_Click" IsEnabled="False"/><Button x:Name="UpdateReleaseNotesButton" Content="Release notes" Click="OpenUpdate_Click" IsEnabled="False"/></StackPanel>
-            <TextBlock x:Name="UpdateStatus" Text="Updates are checked automatically." TextWrapping="Wrap" Style="{StaticResource Caption}"/>
+            <TextBlock x:Name="UpdateStatus" Text="Automatic checks enabled." TextWrapping="Wrap" Style="{StaticResource Caption}"/>
           </StackPanel></Border>
         </StackPanel>
         <StackPanel x:Name="GamesPage" Spacing="16" Visibility="Collapsed">
           <Grid><Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
-            <StackPanel Spacing="4"><TextBlock Text="Saved games" Style="{StaticResource SectionTitle}"/><TextBlock Text="Save a destination once, then choose it in account settings." Style="{StaticResource Caption}"/></StackPanel>
+            <StackPanel Spacing="4"><TextBlock Text="Saved games" Style="{StaticResource SectionTitle}"/><TextBlock Text="Reuse destinations across accounts." Style="{StaticResource Caption}"/></StackPanel>
             <Button Grid.Column="1" Content="Add game" Click="AddGame_Click" Style="{StaticResource AccentButtonStyle}"/>
           </Grid>
-          <TextBlock x:Name="GamesEmpty" Text="No saved games yet. Add a game to get started." Style="{StaticResource Caption}"/>
+          <TextBlock x:Name="GamesEmpty" Text="No saved games yet." Style="{StaticResource Caption}"/>
           <ItemsControl x:Name="GameCards"><ItemsControl.ItemsPanel><ItemsPanelTemplate><local:GameCardPanel/></ItemsPanelTemplate></ItemsControl.ItemsPanel>
             <ItemsControl.ItemTemplate><DataTemplate>
               <Border x:Name="SavedGameCard" Style="{StaticResource Card}" Width="270" Margin="0,0,12,12" PointerEntered="GameCard_PointerEntered" PointerExited="GameCard_PointerExited" Tapped="GameCard_Tapped" KeyDown="GameCard_KeyDown" IsTabStop="True" AutomationProperties.Name="Edit saved game"><StackPanel Spacing="12">
@@ -390,12 +394,12 @@
     <InfoBar x:Name="Feedback" Grid.Column="1" Grid.RowSpan="3" IsOpen="False" IsClosable="True" Closed="Feedback_Closed"
              HorizontalAlignment="Center" VerticalAlignment="Top" MaxWidth="640" Margin="28,12,28,0"
              CornerRadius="10" Severity="Informational" AutomationProperties.LiveSetting="Polite"/>
-    <ContentDialog x:Name="PresetLookupDialog" Title="Choose accounts" PrimaryButtonText="Use selected accounts" CloseButtonText="Cancel" DefaultButton="Primary">
+    <ContentDialog x:Name="PresetLookupDialog" Title="Choose accounts" PrimaryButtonText="Use selection" CloseButtonText="Cancel" DefaultButton="Primary">
       <ContentDialog.Resources><x:Double x:Key="ContentDialogMaxWidth">920</x:Double></ContentDialog.Resources>
       <ScrollViewer x:Name="PresetLookupScroll" VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled">
         <StackPanel x:Name="PresetLookupContent" Spacing="12">
             <Grid ColumnSpacing="8"><Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="180"/></Grid.ColumnDefinitions>
-              <TextBox x:Name="PresetSearch" PlaceholderText="Search alias or username…" TextChanged="PresetSearch_Changed" AutomationProperties.Name="Search accounts for preset"/>
+              <TextBox x:Name="PresetSearch" PlaceholderText="Search accounts…" TextChanged="PresetSearch_Changed" AutomationProperties.Name="Search accounts for preset"/>
               <ComboBox x:Name="PresetGroup" Grid.Column="1" HorizontalAlignment="Stretch" SelectionChanged="PresetGroup_Changed" AutomationProperties.Name="Filter preset accounts by group"/>
             </Grid>
           <Grid ColumnSpacing="8"><Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
@@ -431,14 +435,14 @@
                     </Grid>
                   </DataTemplate></ListView.ItemTemplate>
                 </ListView>
-                <TextBlock x:Name="PresetLookupEmpty" Text="No matching accounts. Try another search or group." Style="{StaticResource Caption}" Margin="12" Visibility="Collapsed"/>
+                <TextBlock x:Name="PresetLookupEmpty" Text="No matching accounts." Style="{StaticResource Caption}" Margin="12" Visibility="Collapsed"/>
               </StackPanel>
             </ScrollViewer>
           <TextBlock x:Name="PresetLookupSummary" Style="{StaticResource Caption}"/>
         </StackPanel>
       </ScrollViewer>
     </ContentDialog>
-    <ContentDialog x:Name="AccountDialog" Title="Account details" PrimaryButtonText="Save changes" CloseButtonText="Cancel" DefaultButton="Primary" PrimaryButtonClick="AccountDialog_Save" Closing="AccountDialog_Closing">
+    <ContentDialog x:Name="AccountDialog" Title="Account details" PrimaryButtonText="Save" CloseButtonText="Cancel" DefaultButton="Primary" PrimaryButtonClick="AccountDialog_Save" Closing="AccountDialog_Closing">
       <ContentDialog.Resources><x:Double x:Key="ContentDialogMaxWidth">640</x:Double></ContentDialog.Resources>
       <ScrollViewer VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled">
         <StackPanel x:Name="DialogFields" Spacing="16">
@@ -456,13 +460,13 @@
           <TextBox x:Name="JobInput" Header="Job ID · optional" PlaceholderText="Server job ID"/>
           <TextBox x:Name="PrivateInput" Header="Private server link · optional" PlaceholderText="https://www.roblox.com/…" MaxLength="2048"/>
           <CheckBox x:Name="DialogRejoin" Content="Automatic rejoin"/>
-          <TextBlock Text="Retries the saved destination after a disconnect, following a 30-second reconnect wait. Turning this off keeps the client open." Style="{StaticResource Caption}" TextWrapping="Wrap"/>
+          <TextBlock Text="Rejoins after a 30-second reconnect wait. Turning off keeps the game open." Style="{StaticResource Caption}" TextWrapping="Wrap"/>
           <TextBox x:Name="DialogGroup" Header="Group · optional" MaxLength="100"/>
-          <ComboBox x:Name="DialogFallback" Header="If the destination is unavailable" HorizontalAlignment="Stretch">
-            <ComboBoxItem Content="Allow public fallback"/><ComboBoxItem Content="Stay on this destination"/><ComboBoxItem Content="Pause and notify"/>
+          <ComboBox x:Name="DialogFallback" Header="If unavailable" HorizontalAlignment="Stretch">
+            <ComboBoxItem Content="Allow public fallback"/><ComboBoxItem Content="Stay on destination"/><ComboBoxItem Content="Pause and notify"/>
           </ComboBox>
-          <CheckBox x:Name="DialogClearTarget" Content="Clear the saved destination"/>
-          <TextBlock Text="Changes apply when you save. Updated destinations are used on the next launch." Style="{StaticResource Caption}"/>
+          <CheckBox x:Name="DialogClearTarget" Content="Clear destination"/>
+          <TextBlock Text="Destinations change on the next launch." Style="{StaticResource Caption}"/>
           <InfoBar x:Name="EditorError" IsOpen="False" IsClosable="False" Severity="Error"/>
         </StackPanel>
       </ScrollViewer>

@@ -9,6 +9,7 @@ pub enum Signal {
     Connected,
     Disconnected,
     ConnectionFailed,
+    JoinRequestFailed,
     SessionLost(Option<u32>),
     TargetUnavailable,
     PermissionDenied,
@@ -17,10 +18,43 @@ pub enum Signal {
 /// Conservative external-log signatures. An attempted join is NOT a connection.
 pub fn parse_line(line: &str) -> Option<Signal> {
     // The first log channel is authoritative; script output must not spoof a network tag.
-    let channel = line
+    let tagged = line
         .split_once('[')
-        .and_then(|(_, tail)| tail.split_once(']'))
-        .map(|(tag, _)| tag);
+        .and_then(|(_, tail)| tail.split_once(']'));
+    let channel = tagged.map(|(tag, _)| tag);
+    // A join HTTP failure can leave the error dialog open without GameJoinFailed
+    // or any network connection. Ignore asset, telemetry and other HTTP traffic.
+    if matches!(
+        channel,
+        Some("FLog::HttpTraceError" | "DFLog::HttpTraceError")
+    ) && let Some((metadata, request)) = tagged
+        .and_then(|(_, message)| message.trim_start().strip_prefix("HttpResponse("))
+        .and_then(|message| message.split_once(" url:{ \""))
+        && let Some((uri, _)) = request.split_once('"')
+        && let Ok(url) = url::Url::parse(uri)
+        && url.scheme() == "https"
+        && url.host_str() == Some("gamejoin.roblox.com")
+        && matches!(
+            url.path(),
+            "/v1/join-game" | "/v1/join-game-instance" | "/v1/join-private-game"
+        )
+    {
+        let number = |key| {
+            metadata.split_once(key).and_then(|(_, value)| {
+                value
+                    .split(|c: char| !c.is_ascii_digit())
+                    .next()?
+                    .parse::<u32>()
+                    .ok()
+            })
+        };
+        if (number(" error:").is_some_and(|code| code != 0)
+            && metadata.contains(" message:HttpError:"))
+            || number("status:").is_some_and(|status| (400..=599).contains(&status))
+        {
+            return Some(Signal::JoinRequestFailed);
+        }
+    }
     let network = [
         "[FLog::Network]",
         "[DFLog::Network]",
@@ -161,6 +195,38 @@ impl Tail {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn failed_join_http_requests_are_recoverable_without_game_join_failed() {
+        // Redacted from a client stuck on Join Error 529 before any network connection.
+        let line = "2026-10-15T11:58:05.018Z,24.018595,4648,12 [DFLog::HttpTraceError] HttpResponse(#19 0x123) time:21052.3ms (net:21052.1ms timeInRetryQueue:0.0ms) error:5 message:HttpError: Timedout url:{ \"https://gamejoin.roblox.com/v1/join-game-instance\" } ip: external:0 numberOfTimesRetried:0";
+        assert_eq!(parse_line(line), Some(Signal::JoinRequestFailed));
+        for path in ["join-game", "join-game-instance", "join-private-game"] {
+            for status in [400, 403, 429, 500, 503, 529] {
+                assert_eq!(
+                    parse_line(&format!(
+                        "[FLog::HttpTraceError] HttpResponse(#1) status:{status} Error url:{{ \"https://gamejoin.roblox.com/v1/{path}\" }}"
+                    )),
+                    Some(Signal::JoinRequestFailed)
+                );
+            }
+        }
+    }
+    #[test]
+    fn unrelated_http_failures_and_spoofed_join_messages_are_ignored() {
+        for line in [
+            "[DFLog::HttpTraceError] HttpResponse(#1) error:5 message:HttpError: Timedout url:{ \"https://assetdelivery.roblox.com/v1/asset\" }",
+            "[FLog::Error] Error making AccountSettingsEmailRequest. Received HTTPErrorCode 5, status code -1.",
+            "[FLog::Output] [DFLog::HttpTraceError] HttpResponse(#1) error:5 message:HttpError: Timedout url:{ \"https://gamejoin.roblox.com/v1/join-game-instance\" }",
+            "[DFLog::HttpTraceError] HttpResponse(#1) status:200 OK url:{ \"https://gamejoin.roblox.com/v1/join-game-instance\" }",
+            "[DFLog::HttpTraceError] HttpResponse(#1) error:0 message:HttpError: OK url:{ \"https://gamejoin.roblox.com/v1/join-game-instance\" }",
+            "[DFLog::HttpTraceError] HttpResponse(#1) status:503 Error url:{ \"https://gamejoin.roblox.com.evil.test/v1/join-game\" }",
+            "[DFLog::HttpTraceError] HttpResponse(#1) status:503 Error url:{ \"https://gamejoin.roblox.com/v1/unrelated?next=/v1/join-game\" }",
+            "[DFLog::HttpTraceError] HttpResponse(#1) status:503 Error url:{ \"invalid\" }",
+            "[FLog::Output] GameJoinFailed errorCode: 529",
+        ] {
+            assert_eq!(parse_line(line), None);
+        }
+    }
     #[test]
     fn server_no_response_is_recoverable_but_unrelated_network_failures_are_ignored() {
         assert_eq!(

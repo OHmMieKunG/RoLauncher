@@ -1,76 +1,106 @@
 # Validation
 
+Recorded checks below are historical results, not guarantees of live Roblox compatibility.
+Fixtures use isolated data and simulated accounts unless stated otherwise.
+
+## 1.7.0 HTTP join recovery — 2026-10-15
+
+- Passed on Windows: 75 Rust tests, separate authenticated Rust/WinUI bootstrap, 74 desktop checks, WinUI fixture, formatting, Clippy, and release consistency.
+- Installer/update checks passed checksum rejection, cancellation, exit waiting, installation, restart, and data preservation.
+- Regression failed before the fix. Read-only log replay then detected one recoverable HTTP join failure and zero connection signals.
+- Coverage: public/instance/private HTTP failures, code 529, Unknown-to-Reconnecting, 30-second grace, repeated failures, successful reconnection, Stop, disabled rejoin, destinations, retry limits, and verified closure.
+- Unrelated HTTP traffic and spoofed script output are ignored; diagnostics omit raw logs, credentials, and authenticated URLs.
+- No live failure/rejoin cycle was performed; real clients/data were unchanged. Native Linux remains untested for this change.
+
+## 1.7.0 game joining — 2026-10-15
+
+- Passed on Windows: 72 Rust tests, separate bootstrap, 74 desktop checks, formatting, Clippy, WinUI interactions/rendering, and isolated installer/update checks.
+- Coverage: ranking, full/team capacity, missing ping, invalid IDs, matching user/place presence, hidden presence through peer sessions, unreadable sessions, explicit targets, preset identity, fallback grouping, bounded waiting, atomic validation, persistence, presets, and backups.
+- UI checks covered saved preferences/assignments, existing dialogs/navigation, wrapping, and alignment.
+- Packages include runtime, WebView2 loader, corresponding source, instructions, licenses, and SHA256 checksums.
+- Live read-only checks confirmed public-server fields and redacted friend presence; isolated encrypted-record copies resolved the peer's instance without launching clients or changing real data.
+- Live multi-account joining, access denials, capacity races, region/local latency, and native Linux remain unverified. Smart cannot guarantee region or local latency.
+
 ## Upcoming 1.6.0 navigation, Windows materials and capture fix — 2026-10-10
 
-Windows: 67 Rust tests plus the separately invoked authenticated Rust/WinUI bootstrap fixture passed. The new OS fixture checks 2880×1800 and 5120×1440 physical client dimensions after resizing a hidden window from a DPI-unaware worker, restores the prior DPI context, and rejects a different owner. Allocation checks cover FHD, 2.8K, 4K, ultrawide and 8K sizes, invalid dimensions and oversized buffers. Formatting, Clippy with warnings denied, release consistency, 71 desktop checks and the complete WinUI interaction/rendering fixture passed.
+- Passed: 67 Windows Rust tests, separate bootstrap, 71 desktop checks, formatting, Clippy, release consistency, WinUI fixtures, and isolated installer/update checks.
+- Capture fixtures checked 2880×1800/5120×1440 physical dimensions, DPI context restoration, owner rejection, FHD through 8K allocation, invalid dimensions, and oversized buffers.
+- Navigation checks covered fade/slide, interrupted transitions, one active page/tab, highlight placement, reduced motion, and current-page scroll retention.
+- Existing account, preset, backup, Discord, update, keyboard, dialog, and minimum/wide-window workflows passed.
+- Light/dark workspace/dialog/changelog images were inspected for wrapping, spacing, actions, footer, and scrollbar clearance.
+- Font checks covered native Windows metrics, TEST/16205713724 label widths, Linux Inter regular/semibold metrics, manifests, and package licenses.
+- Shared Uno views compiled; Arch WSL/X11 passed native input, scroll reset, Save/Cancel, bulk Cancel, and rendering. XTest is fixture-only.
+- Capture development packaging verified runtime/source/notices/checksums and isolated startup.
 
-The WinUI fixture verifies actual fade and translation during navigation, rapid-switch cancellation, one selected tab and one visible page, selection-pill placement and height across every sidebar group, immediate reduced-motion navigation, and current-page scroll retention. It also covers the existing account, preset, backup, Discord, update, dialog, keyboard and minimum/wide-window workflows. Light and dark screenshots of the neutral workspace, account editor, preset review and delete confirmation were inspected after motion settled. Typography checks verify native Windows font selection, distinct regular/semibold metrics, and matching input/label widths for the reported TEST and 16205713724 strings in light/dark dialogs. Linux compares actual regular/semibold text measurements against the bundled static Inter faces and verifies its font manifest. Windows package checks reject bundled text font assets; Linux checks require Inter files and its OFL license in the runtime archive. Changelog layout checks cover light/dark and minimum-window presentation, scrollbar clearance, wrapping, compact actions and a visible footer. RenderTargetBitmap excludes the OS Mica backdrop, so fixture PNGs use its neutral solid base; wallpaper tint and inactive-window material behavior require device testing. High-contrast resources compile and native Mica uses system fallbacks; toggling real system contrast/transparency preferences still requires device testing.
+Device testing still required:
 
-The shared Uno views compile and the Arch WSL/X11 fixture passes native pointer/keyboard interaction, scroll reset, account Save/Cancel, bulk Cancel and rendering. The existing workspace XTest library is used only by the fixture. Linux keeps a neutral opaque host workspace behind its layered surfaces. Native GNOME/KDE parity and live Sober behavior remain pending. Isolated installer/update tests pass checksum rejection, cancellation, process waiting, restart and preserved data. The separate capture-only development package has verified runtime/source/notices/instructions, checksums and isolated startup.
-
-The fixtures do not prove GPU screenshot rendering in a real Roblox session. Verify the full client, particularly the bottom-right corner, at 100%, 150%, 175% and 200% scaling, after resizing, and after moving between monitors with different scaling. Minimized/protected or unsupported windows may still refuse capture; capture never falls back to copying the desktop.
+- Real Mica wallpaper/inactive effects; fixture PNGs omit the OS backdrop.
+- System high-contrast/transparency toggles; resources compile but device behavior is unverified.
+- Roblox GPU capture, including the bottom-right corner at 100%, 150%, 175%, and 200%, resizing, and mixed-DPI monitors.
+- Native GNOME/KDE parity and live Sober. Unsupported/minimized/protected capture stays unavailable; no desktop fallback.
 
 ## 1.3.0 workspace, saved games and Linux interactions — 2026-10-06
 
-Windows: 50 Rust tests and the separately invoked authenticated Rust/WinUI bootstrap check passed. Linux in Arch WSL: 52 Rust tests passed, plus the separately invoked disposable Flatpak isolation probe. Formatting and Clippy with warnings denied passed on both platforms; 60 desktop model/editor/update checks passed on Windows. Installer fixtures passed checksum rejection, cancellation, complete installation, process waiting, relaunch, and data preservation.
-
-WinUI smoke passed sidebar navigation and scroll reset, saved game creation/editing and account destination selection, persisted close preferences, the two-version changelog modal, bulk edits, legacy account presets, backup/history filtering, modal validation, and small-window rendering. Linux Uno smoke passed native Ctrl+A, XTest mouse clicks on Start and account row edit buttons, selected-account requests reaching the authenticated fixture, page scroll reset, account Save/Cancel and invalid destination rejection, bulk Cancel, changelog rendering, and feedback. Rendered Windows and Linux screenshots were inspected. Linux smoke requires XTest only for tests; production builds do not depend on it.
-
-The Flatpak probe confirms that each sandbox advertises input-device access in its own metadata while retaining separate temporary/runtime filesystems, IPC and PID namespaces and host networking. This avoids depending on a host override inside `--sandbox`. Flatpak 1.15.6 or newer is required; older versions receive a startup message explaining the prerequisite. Saved game tests verify validation, duplicate names, persistence across restart, encrypted backup/restore, and independent account destinations after profile deletion. New API routes reject missing authentication and cross-origin requests.
-
-These checks use simulated sessions and a harmless Flatpak probe. Live Roblox game metadata/thumbnail lookup and Sober onboarding/launches on GNOME and KDE remain unverified. Linux font/DPI/tray/portal parity and concurrent real games still require the native desktop acceptance matrix below.
-
+- Passed: 50 Windows/52 Arch WSL Rust tests, separate Windows bootstrap, 60 desktop checks, formatting/Clippy on both platforms, installer fixtures, and disposable Flatpak probe.
+- WinUI covered navigation, saved games/destinations, close preference, changelog, bulk/presets, backups/history, validation, and small windows.
+- Uno covered Ctrl+A, native clicks, authenticated account actions, scrolling, valid/invalid Save, Cancel, bulk Cancel, changelog, and feedback. Screenshots were inspected.
+- Flatpak probe confirmed input grants, separate temporary/runtime/IPC/PID namespaces, and shared networking. Flatpak 1.15.6+ is required.
+- Saved-game checks covered names/validation, restart persistence, backup/restore, retained destinations after deletion, and API authentication/origin rejection.
+- Live game metadata, Sober onboarding/launches, desktop parity, and concurrent games remained unverified.
 
 ## 1.2.0 Linux isolation, update channel and dropdown fixes — 2026-10-06
 
-Windows: 49 Rust tests plus the separate authenticated Rust/WinUI bootstrap fixture passed. Linux in Arch WSL: 50 Rust tests passed, plus the separately invoked Flatpak isolation regression. Clippy passed with warnings denied on both platforms. All 60 desktop model/editor/updater checks passed on Windows and Linux (the Linux net8 test assembly ran on the existing .NET 10 runtime with major roll-forward). Native WinUI and Uno rendering fixtures passed; both measured equal heights for the group dropdown and adjacent buttons. WinUI also verified beta opt-in persistence, labeled beta banners and returning to stable updates. Tests cover authenticated preference storage across restarts, numeric release selection, exact beta download URLs and checksum-verified beta downloads. Formatting and release consistency checks passed.
+- Passed: 49 Windows/50 Arch WSL Rust tests, separate Windows bootstrap, 60 desktop checks on both platforms, Clippy, formatting, release consistency, and native WinUI/Uno fixtures.
+- Linux net8 desktop checks ran on .NET 10 with major roll-forward.
+- UI/update checks covered dropdown height, beta persistence/labels, stable selection, authenticated preferences, numeric ordering, exact URLs, and verified downloads.
+- Flatpak 1.16.3 probe reproduced shared locks with distinct homes; built-in sandbox launches acquired locks independently with private filesystems/IPC/PID namespaces and shared networking.
+- The static C probe never launched Sober/Roblox. It proves OS isolation, not concurrent games or the frozen-warning cause.
+- Native desktop onboarding, input/audio, ownership, recovery, and socket conflicts remained unverified. Hosted Windows/Ubuntu checks gate publication.
+- Published artifacts stayed unchanged; stable-only 1.0.0/1.1.0 updaters could discover 1.2.0.
 
-The disposable Flatpak 1.16.3 fixture reproduced a shared temporary lock between two normal launches with distinct homes. Two launches using the app's built-in command builder acquired the lock independently and had distinct temporary filesystems, runtime directories, IPC and PID namespaces while retaining the host network namespace. Isolation is automatic for every launch and retry; no user-installed adapter or environment flag is needed. The fixture uses a static C probe and never starts Sober or Roblox.
-
-This proves the chosen OS isolation behavior, not concurrent Roblox games or the cause of the reported frozen warning. Native Arch/KDE tests of two accounts, rendering/input/audio, onboarding, per-account status, Stop/Restart and recovery remain required. Host-network socket conflicts remain possible. This record covers local validation; hosted Windows and Ubuntu checks gate release packaging/publication. No published application artifacts are replaced. Published 1.0.0 and 1.1.0 installations can use their stable update check to install 1.2.0 and gain the beta update setting. See [integrated Linux isolation](LINUX.md#experimental-concurrent-launch-isolation).
+[Integrated isolation](LINUX.md#experimental-concurrent-launch-isolation)
 
 ## 1.1.0 Linux/Sober beta — local checks, 2026-10-06
 
-Windows retains native WinUI. Linux reuses its XAML and interaction handlers through Uno/Skia. This is a preview, not completion of the required 100% UI/UX parity.
-
-| Environment | Passed local checks |
+| Environment | Passed |
 | --- | --- |
-| Windows | 46 Rust tests plus the separate Rust/WinUI bootstrap check; 53 desktop model/editor/updater checks; real WinUI interaction/rendering fixture; isolated installer/update regression checks |
-| Arch in WSL, X11 | 47 Rust tests, including authenticated encryption, process identity and shared-log rejection; Clippy with warnings denied; 53 shared desktop checks; three archive/rollback tests |
-| Uno Linux shell in WSL | Build and rendering; search/filter/selection; account editor binding, invalid Save rejection, Save/Cancel; bulk editor Cancel; Accounts, Settings, Recovery, Changelog, dialogs and feedback captures |
+| Windows | 46 Rust tests, separate bootstrap, 53 desktop checks, WinUI fixture, installer/update fixtures |
+| Arch WSL/X11 | 47 Rust tests, encryption/identity/shared-log checks, Clippy, 53 desktop checks, three archive/rollback tests |
+| Uno WSL shell | Build/rendering, filtering/selection, editor binding/validation/Save/Cancel, bulk Cancel, pages/dialogs/feedback |
 
-These checks use simulated accounts. The Secret Service session, WebKitGTK sign-in, current Sober launches/logs/recovery, tray host and desktop file portals remain unverified. The Ubuntu/Arch × GNOME/KDE × X11/Wayland acceptance matrix, font matching, DPI, accessibility and complete Windows parity remain pending. See [Linux acceptance requirements](LINUX.md). This local record predates hosted beta validation. The beta publication workflow also requires Windows regression checks, Ubuntu 24.04 checks and normal packaged-shell startup before publishing a prerelease.
+- Windows retained WinUI; Linux shared its layouts through Uno/Skia. Complete parity was not established.
+- Secret Service, WebKit sign-in, Sober recovery, tray, portals, native desktops, fonts/DPI, and accessibility remained unverified.
+- This local record predates hosted beta checks; publication also requires Windows/Ubuntu tests and normal packaged-shell startup.
 
 ## Historical 1.0.0 validation
 
-Checked on 2026-10-06 for RoLauncher 1.0.0. The following record applies to that release.
+Recorded 2026-10-06.
 
 ## Passed automated checks
 
 | Area | Coverage |
 | --- | --- |
-| Rust | 46 tests; account storage, encryption, recovery, profiles, backups, API access, and legacy data selection |
-| Desktop | 52 checks; editors, filters, selection, update validation, downloads, and cancellation |
-| Real app window | Navigation, account workflows, update buttons, rendering, and Rust/WinUI bootstrap |
-| Installer | Checksum rejection, exit waiting, installation, relaunch, and data-path preservation |
-| Packages | Matching source/version, required runtime/docs/licenses, ZIP integrity, SHA256, and app startup |
-| Code quality | Formatting and Clippy with warnings denied |
-
-Hosted Windows CI passed on the feature and promotion PRs. Tests use isolated data and simulated accounts; they do not prove real Roblox or Discord behavior.
+| Rust | 46 tests: storage/encryption, recovery, profiles, backups, API, legacy data |
+| Desktop | 52 checks: editors, filters, selection, update validation/download/cancel |
+| Real window | Navigation, accounts, update buttons, rendering, bootstrap |
+| Installer | Checksum rejection, exit waiting, install/relaunch, retained data |
+| Packages | Source/version, runtime/docs/licenses, ZIPs, checksums, startup |
+| Quality | Formatting, Clippy with warnings denied; hosted Windows CI on feature/promotion PRs |
 
 ## Limited live evidence
 
-Earlier checks verified ticket acquisition and process mapping for one observed Roblox client. Recognized disconnect messages were also checked against existing logs. This does not establish multi-account or complete recovery compatibility.
+Earlier ticket acquisition, one-client process mapping, and existing disconnect logs were checked.
+This does not establish multi-account or complete recovery compatibility.
 
 ## Still needs real-client testing
 
-- Launch two accounts and confirm each process and connection status.
-- Check disconnect recovery, teleports, private destinations, and fallback policies.
-- Check expired-session repair, rate limits, and network loss/recovery.
-- Send real Discord notifications.
-- Measure total app resource usage with 0, 10, and 50 clients.
-- Confirm updating between two real public versions.
+- Two-account launch/process/status attribution; disconnects, teleports, private targets, fallback.
+- Session repair, rate limits, network loss/recovery, and real Discord delivery.
+- Total app usage with 0/10/50 clients; updates between two real public versions.
+- [Native Linux acceptance matrix](LINUX.md#required-acceptance-matrix).
 
-Missing or ambiguous client information must produce Unknown, Needs attention, or Unsupported. RoLauncher must not use memory inspection or client modification to work around it.
+Ambiguous clients must remain Unknown, Needs attention, or Unsupported.
+Read-only memory inspection is permitted; modifying Roblox memory/client files is prohibited.
+The installer is unsigned.
 
-The installer is unsigned. See [release notes](RELEASE-1.0.0.md) and [performance notes](PERFORMANCE.md).
+[1.0.0 notes](RELEASE-1.0.0.md) · [Performance](PERFORMANCE.md)
