@@ -35,6 +35,8 @@ jobs:
             pacman -Syu --noconfirm --needed base-devel pkgconf dbus curl git python icu openssl zlib fontconfig libx11 libxrandr libxi libxtst mesa xorg-server-xvfb xorg-xauth ttf-dejavu
           fi
       - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
       - uses: actions/setup-dotnet@v4
         with:
           dotnet-version: |
@@ -53,6 +55,7 @@ jobs:
           cargo fmt --check
           python3 scripts/check-release.py
           python3 scripts/test-linux-update.py
+          python3 scripts/test-release-promotion.py
           python3 scripts/test-sober-isolation-adapter.py
           dotnet restore desktop.tests/RoLauncher.Desktop.Tests.csproj --locked-mode --configfile desktop/NuGet.Config
           dotnet run --project desktop.tests --no-restore -c Release
