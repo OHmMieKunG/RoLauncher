@@ -856,3 +856,63 @@ fn explicit_stop_closes_only_the_verified_owned_process() {
     drop(engine);
     std::fs::remove_dir_all(path).unwrap();
 }
+
+#[test]
+fn confirmed_live_exit_preserves_stop_authority_for_a_separate_retired_client() {
+    let f = Fixture::new();
+    let original = f.account();
+    let retired_generation = Uuid::new_v4();
+    f.engine
+        .transaction(|s| {
+            s.database.retired_launches.push(RetiredLaunch {
+                tracker: "987654321012".into(),
+                generation: retired_generation,
+                account_id: "1".into(),
+                deadline: Utc::now() + ChronoDuration::seconds(90),
+                close_intent: None,
+                process: Some(ProcessIdentity {
+                    pid: 5300,
+                    creation_time: "retired-synthetic".into(),
+                    tracker: "987654321012".into(),
+                    generation: retired_generation,
+                }),
+            });
+            Ok(())
+        })
+        .unwrap();
+    f.engine.command("1", "stop").unwrap();
+    let stopped = f.account();
+    f.engine
+        .owned_exit_observed(&stopped, stopped.process.as_ref().unwrap(), false);
+    assert!(f.account().process.is_none());
+    let old = Store::new(f.path.clone())
+        .unwrap()
+        .load()
+        .unwrap()
+        .retired_launches
+        .remove(0);
+    let mut effects = Vec::new();
+    f.engine
+        .close_retired(
+            &old,
+            Instant::now(),
+            &mut CloseAttempts::default(),
+            || {
+                Ok(vec![platform::Player {
+                    pid: 5300,
+                    creation_time: "retired-synthetic".into(),
+                    tracker: old.tracker.clone(),
+                }])
+            },
+            |p, force| {
+                effects.push((p.pid, force));
+                Ok(())
+            },
+        )
+        .unwrap();
+    assert_eq!(effects, vec![(5300, false)]);
+    // A stale exit observation cannot change the current Stop's desired state.
+    f.engine
+        .owned_exit_observed(&original, original.process.as_ref().unwrap(), false);
+    assert!(!f.account().desired_running);
+}

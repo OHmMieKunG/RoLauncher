@@ -127,6 +127,57 @@ fn eligible(
 }
 
 impl Engine {
+    /// Non-destructive observation: stale exit reports cannot erase current ownership.
+    pub(super) fn owned_exit_observed(
+        &self,
+        account: &Account,
+        identity: &ProcessIdentity,
+        clean: bool,
+    ) {
+        let _ = self.update(&account.id, account.generation, |a| {
+            if a.process.as_ref() != Some(&identity) {
+                return;
+            }
+            a.process = None;
+            a.tracker = None;
+            a.ownership_deadline = None;
+            a.connected_since = None;
+            a.disconnected_since = None;
+            resume_after_confirmed_close(a);
+            if a.close_intent
+                .as_ref()
+                .is_none_or(|i| !i.denied && i.reason != CloseReason::UserStop)
+            {
+                a.close_intent = None;
+            }
+            if a.desired_running
+                && a.auto_recovery
+                && !matches!(
+                    a.status,
+                    Status::NeedsAttention | Status::Queued | Status::Backoff
+                )
+            {
+                apply_failure(
+                    a,
+                    &Failure::new(
+                        FailureKind::Other,
+                        "Managed client exited; scheduling recovery",
+                    ),
+                );
+            } else if !a.desired_running || !a.auto_recovery {
+                a.desired_running = false;
+                a.status = Status::Stopped;
+            }
+            if clean && !account.disconnect_notified {
+                a.last_error = Some("Client closed normally".into());
+                a.recovery_reason = "NormalExit".into();
+            }
+        });
+        if !account.desired_running {
+            self.finish_operation(&account.id, account.generation, None);
+        }
+    }
+
     // Same durable-before-visible ordering as Engine::transaction; callers already
     // hold the command mutex, including through the subsequent synchronous effect.
     fn commit_close_state(&self, state: &mut State, mut next: State) -> Result<(), String> {

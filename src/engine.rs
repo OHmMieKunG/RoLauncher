@@ -994,45 +994,7 @@ impl Engine {
                             exit_watches.remove(&key).and_then(|w| w.clean_exit()) == Some(true);
                         tails.remove(&key);
                         close_attempts.remove(&identity);
-                        let _ = self.update(&account.id, account.generation, |a| {
-                            if a.process.as_ref() != Some(&identity) {
-                                return;
-                            }
-                            a.process = None;
-                            a.tracker = None;
-                            a.ownership_deadline = None;
-                            a.connected_since = None;
-                            a.disconnected_since = None;
-                            resume_after_confirmed_close(a);
-                            if a.close_intent.as_ref().is_none_or(|i| !i.denied) {
-                                a.close_intent = None;
-                            }
-                            if a.desired_running
-                                && a.auto_recovery
-                                && !matches!(
-                                    a.status,
-                                    Status::NeedsAttention | Status::Queued | Status::Backoff
-                                )
-                            {
-                                apply_failure(
-                                    a,
-                                    &Failure::new(
-                                        FailureKind::Other,
-                                        "Managed client exited; scheduling recovery",
-                                    ),
-                                );
-                            } else if !a.desired_running || !a.auto_recovery {
-                                a.desired_running = false;
-                                a.status = Status::Stopped;
-                            }
-                            if clean && !account.disconnect_notified {
-                                a.last_error = Some("Client closed normally".into());
-                                a.recovery_reason = "NormalExit".into();
-                            }
-                        });
-                        if !account.desired_running {
-                            self.finish_operation(&account.id, account.generation, None);
-                        }
+                        self.owned_exit_observed(&account, &identity, clean);
                         continue;
                     }
                     Err(_) => {

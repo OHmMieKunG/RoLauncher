@@ -65,6 +65,7 @@ OS coordination remains a separate input; no license policy or licensing network
 - Denial retains client/process evidence, reports an attention state and does not consume another recovery retry.
 - Failed close attempts are latched in memory even if persisting their denial fails; no tick can silently retry with stronger force.
 - A natural exit after a denied close does not silently resume replacement. An explicit valid command is required.
+- Confirmed exit of a current client preserves explicit Stop authority for separate retired clients still awaiting cleanup.
 - Current eligible recovery schedules its existing retry only after a successful graceful submission.
 - Activity recording, status notifications, durable-before-visible state changes and snapshot delivery are preserved.
 
