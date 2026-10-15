@@ -172,6 +172,7 @@ impl Store {
             a.status = crate::model::Status::Stopped;
             a.generation = uuid::Uuid::new_v4();
             a.operation_id = None;
+            a.close_intent = None;
             a.next_retry = None;
             a.connected_since = None;
             a.disconnected_since = None;
