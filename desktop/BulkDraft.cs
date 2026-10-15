@@ -6,6 +6,7 @@ public sealed class BulkDraft
     public bool ApplyAlias { get; set; }
     public bool ApplyTarget { get; set; }
     public bool ClearTarget { get; set; }
+    public string? GameProfileId { get; set; }
     public bool ApplyRejoin { get; set; }
     public bool Rejoin { get; set; }
     public bool ApplyGroup { get; set; }
@@ -18,7 +19,7 @@ public sealed class BulkDraft
         if (ApplyAlias)
         {
             if (string.IsNullOrWhiteSpace(Fields.Alias) || Fields.Alias.Length > 100 || Fields.Alias.Any(char.IsControl))
-            { error = "Enter an alias or alias pattern with up to 100 characters."; return false; }
+            { error = "Enter an alias or pattern, up to 100 characters."; return false; }
             patch["alias"] = Fields.Alias;
         }
         if (ApplyTarget)
@@ -28,16 +29,17 @@ public sealed class BulkDraft
             {
                 if (!Fields.TryTarget(out var target, out error)) return false;
                 patch["target"] = target;
+                if (GameProfileId is not null) patch["game_profile_id"] = GameProfileId;
             }
         }
         if (ApplyRejoin) patch["auto_recovery"] = Rejoin;
         if (ApplyGroup)
         {
-            if (Group.Length > 100 || Group.Any(char.IsControl)) { error = "Group must be at most 100 characters without control characters."; return false; }
+            if (Group.Length > 100 || Group.Any(char.IsControl)) { error = "Group: max 100 characters; no control characters."; return false; }
             patch["group"] = Group;
         }
         if (ApplyFallback) patch["fallback_policy"] = Fallback;
-        if (patch.Count == 0) { error = "Choose at least one Apply setting."; return false; }
+        if (patch.Count == 0) { error = "Check at least one Apply setting."; return false; }
         return true;
     }
 }

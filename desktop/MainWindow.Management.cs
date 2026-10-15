@@ -21,7 +21,7 @@ public sealed partial class MainWindow
     private static ComboBox PolicyPicker() => new()
     {
         HorizontalAlignment = HorizontalAlignment.Stretch, SelectedIndex = 0,
-        Items = { "Allow public fallback", "Stay on this destination", "Pause and notify" }
+        Items = { "Allow public fallback", "Stay on destination", "Pause and notify" }
     };
     private void UpdateManagement(Snapshot snapshot)
     {
@@ -80,7 +80,7 @@ public sealed partial class MainWindow
     {
         _historyPage = Math.Clamp(_historyPage, 0, Math.Max(0, (_history.Length - 1) / 100));
         HistoryList.ItemsSource = _history.Skip(_historyPage * 100).Take(100).ToArray();
-        HistoryPageSummary.Text = _history.Length == 0 ? "No activity for this filter" : $"{_historyPage * 100 + 1}–{Math.Min((_historyPage + 1) * 100, _history.Length)} of {_history.Length}";
+        HistoryPageSummary.Text = _history.Length == 0 ? "No matching activity" : $"{_historyPage * 100 + 1}–{Math.Min((_historyPage + 1) * 100, _history.Length)} of {_history.Length}";
         HistoryPrevious.IsEnabled = _historyPage > 0; HistoryNext.IsEnabled = (_historyPage + 1) * 100 < _history.Length;
     }
     private void HistoryPage_Click(object sender, RoutedEventArgs e) { _historyPage += int.Parse((string)((Button)sender).Tag); ShowHistoryPage(); }
@@ -103,10 +103,10 @@ public sealed partial class MainWindow
     private sealed class BulkForm
     {
         public CheckBox AliasApply = new() { Content = "Apply alias / pattern" }, TargetApply = new() { Content = "Apply destination" },
-            ClearTarget = new() { Content = "Clear destination" }, RejoinApply = new() { Content = "Apply automatic rejoin" }, Rejoin = new() { Content = "Automatic rejoin" },
-            GroupApply = new() { Content = "Apply group" }, FallbackApply = new() { Content = "Apply fallback policy" };
-        public TextBox Alias = new() { Header = "Alias · supports {username}, {id}, {index}", MaxLength = 100 },
-            Place = new() { Header = "Place ID" }, Job = new() { Header = "Job ID · optional" }, Private = new() { Header = "Private server link · optional", MaxLength = 2048 }, Group = new() { Header = "Group · blank removes membership", MaxLength = 100 };
+            ClearTarget = new() { Content = "Clear destination" }, RejoinApply = new() { Content = "Apply rejoin" }, Rejoin = new() { Content = "Automatic rejoin" },
+            GroupApply = new() { Content = "Apply group" }, FallbackApply = new() { Content = "Apply fallback" };
+        public TextBox Alias = new() { Header = "Alias · {username}, {id}, {index}", MaxLength = 100 },
+            Place = new() { Header = "Place ID" }, Job = new() { Header = "Job ID · optional" }, Private = new() { Header = "Private server link · optional", MaxLength = 2048 }, Group = new() { Header = "Group · blank clears", MaxLength = 100 };
         public ComboBox Fallback = PolicyPicker();
         public ComboBox Game = new() { Header = "Saved game · optional", HorizontalAlignment = HorizontalAlignment.Stretch, PlaceholderText = "Custom destination" };
         public InfoBar Error = new() { IsClosable = false, Severity = InfoBarSeverity.Error };
@@ -114,6 +114,7 @@ public sealed partial class MainWindow
         {
             Fields = new() { Alias = Alias.Text, Place = Place.Text, Job = Job.Text, Private = Private.Text },
             ApplyAlias = AliasApply.IsChecked == true, ApplyTarget = TargetApply.IsChecked == true, ClearTarget = ClearTarget.IsChecked == true,
+            GameProfileId = (Game.SelectedItem as GameProfile)?.Id,
             ApplyRejoin = RejoinApply.IsChecked == true, Rejoin = Rejoin.IsChecked == true, ApplyGroup = GroupApply.IsChecked == true, Group = Group.Text,
             ApplyFallback = FallbackApply.IsChecked == true, Fallback = PolicyValue(Fallback.SelectedIndex)
         };
@@ -124,35 +125,36 @@ public sealed partial class MainWindow
         if (_modalOpen || rows.Length == 0) { if (rows.Length == 0) FeedbackMessage("Select accounts first."); return; }
         var ids = rows.Select(r => r.Id).ToArray(); // Freeze scope while the dialog is open.
         var form = new BulkForm(); _bulkForm = form;
-        form.Game.ItemsSource = _gameProfiles;
+        form.Game.ItemsSource = _gameProfiles.Cast<object>().Prepend("Custom destination").ToArray();
         form.Game.SelectionChanged += (_, _) => {
-            if (form.Game.SelectedItem is not GameProfile profile) return;
+            if (form.Game.SelectedItem is not GameProfile profile) { EnableFields(); return; }
             form.TargetApply.IsChecked = true; form.ClearTarget.IsChecked = false;
             form.Place.Text = profile.Target.PlaceId.ToString(); form.Job.Text = profile.Target.JobId ?? "";
             form.Private.Text = profile.Target.PrivateServerLink ?? "";
+            EnableFields();
         };
-        form.Alias.Text = Common(rows, a => a.Alias); form.Alias.PlaceholderText = "Mixed aliases · example: Team {index} ({username})";
-        form.Place.Text = Common(rows, a => a.Target?.PlaceId.ToString() ?? ""); form.Place.PlaceholderText = "Mixed or unset destinations";
+        form.Alias.Text = Common(rows, a => a.Alias); form.Alias.PlaceholderText = "Mixed · e.g. Team {index}";
+        form.Place.Text = Common(rows, a => a.Target?.PlaceId.ToString() ?? ""); form.Place.PlaceholderText = "Mixed or unset";
         form.Job.Text = Common(rows, a => a.Target?.JobId ?? ""); form.Private.Text = Common(rows, a => a.Target?.PrivateServerLink ?? "");
         form.Group.Text = Common(rows, a => a.Group); form.Group.PlaceholderText = "Mixed or ungrouped";
         form.Rejoin.IsThreeState = true;
         form.Rejoin.IsChecked = rows.All(r => r.Account.AutoRecovery) ? true : rows.All(r => !r.Account.AutoRecovery) ? false : null;
         form.Fallback.SelectedIndex = rows.Select(r => r.Account.FallbackPolicy).Distinct().Count() == 1 ? PolicyIndex(rows[0].Account.FallbackPolicy) : -1;
-        form.Fallback.PlaceholderText = "Mixed policies · choose one to apply";
+        form.Fallback.PlaceholderText = "Mixed · choose policy";
         var content = new StackPanel { Spacing = 10 };
-        content.Children.Add(new TextBlock { Text = $"{rows.Length} accounts. Only checked Apply settings change. Destination replaces Place ID, Job ID and private link together, on the next launch.", TextWrapping = TextWrapping.Wrap });
+        content.Children.Add(new TextBlock { Text = $"Only checked settings change. Destination replaces Place ID, Job ID, and private link on the next launch.", TextWrapping = TextWrapping.Wrap });
         content.Children.Add(new Expander { Header = "Included accounts", HorizontalAlignment = HorizontalAlignment.Stretch, Content = new ScrollViewer { MaxHeight = 160, Content = new TextBlock { Text = string.Join("\n", rows.Select(r => $"{r.Alias} · @{r.Account.Username} · {r.Id}")), TextWrapping = TextWrapping.Wrap } } });
         foreach (var element in new UIElement[] { form.AliasApply, form.Alias, form.TargetApply, form.ClearTarget, form.Game, form.Place, form.Job, form.Private, form.RejoinApply, form.Rejoin, form.GroupApply, form.Group, form.FallbackApply, form.Fallback, form.Error })
         {
             content.Children.Add(element);
             if (element == form.Rejoin)
-                content.Children.Add(new TextBlock { Text = "Check Apply automatic rejoin, then choose on or off for all included accounts. Turning it off keeps clients open. Changes apply when you save.", TextWrapping = TextWrapping.Wrap, Style = (Style)Application.Current.Resources["Caption"] });
+                content.Children.Add(new TextBlock { Text = "Choose on or off. Turning off keeps games open.", TextWrapping = TextWrapping.Wrap, Style = (Style)Application.Current.Resources["Caption"] });
         }
         void EnableFields()
         {
             form.Alias.IsEnabled = form.AliasApply.IsChecked == true;
             form.ClearTarget.IsEnabled = form.TargetApply.IsChecked == true;
-            form.Place.IsEnabled = form.Job.IsEnabled = form.Private.IsEnabled = form.TargetApply.IsChecked == true && form.ClearTarget.IsChecked != true;
+            form.Place.IsEnabled = form.Job.IsEnabled = form.Private.IsEnabled = form.TargetApply.IsChecked == true && form.ClearTarget.IsChecked != true && form.Game.SelectedItem is not GameProfile;
             form.Rejoin.IsEnabled = form.RejoinApply.IsChecked == true; form.Group.IsEnabled = form.GroupApply.IsChecked == true;
             form.Fallback.IsEnabled = form.FallbackApply.IsChecked == true;
         }
@@ -161,7 +163,7 @@ public sealed partial class MainWindow
             check.Checked += (_, _) => EnableFields(); check.Unchecked += (_, _) => EnableFields();
         }
         EnableFields();
-        var dialog = new ContentDialog { XamlRoot = Root.XamlRoot, Title = $"Edit {rows.Length} accounts", Content = new ScrollViewer { Content = content, MaxHeight = 520, VerticalScrollBarVisibility = ScrollBarVisibility.Auto }, PrimaryButtonText = "Apply changes", CloseButtonText = "Cancel", RequestedTheme = Root.ActualTheme };
+        var dialog = new ContentDialog { XamlRoot = Root.XamlRoot, Title = $"Edit {rows.Length} accounts", Content = new ScrollViewer { Content = content, MaxHeight = 520, VerticalScrollBarVisibility = ScrollBarVisibility.Auto }, PrimaryButtonText = "Apply", CloseButtonText = "Cancel", RequestedTheme = Root.ActualTheme };
         ApplyDialogTheme(dialog); _bulkDialog = dialog;
         dialog.Closing += (_, args) => args.Cancel = _saving;
         dialog.PrimaryButtonClick += async (_, args) =>
@@ -169,14 +171,14 @@ public sealed partial class MainWindow
             args.Cancel = true;
             if (!form.Draft().TryPatch(out var patch, out var error)) { form.Error.Message = error; form.Error.IsOpen = true; return; }
             if (form.RejoinApply.IsChecked == true && form.Rejoin.IsChecked is null || form.FallbackApply.IsChecked == true && form.Fallback.SelectedIndex < 0)
-            { form.Error.Message = "Choose a specific rejoin value and fallback policy for the settings being applied."; form.Error.IsOpen = true; return; }
+            { form.Error.Message = "Choose on/off for rejoin and a fallback policy where applied."; form.Error.IsOpen = true; return; }
             var deferral = args.GetDeferral(); _saving = true; dialog.IsPrimaryButtonEnabled = false; content.IsHitTestVisible = false;
             try
             {
                 var saved = false;
                 await GuardAsync(async () => { await _api.SendAsync(HttpMethod.Patch, "accounts/bulk", new { account_ids = ids, patch }); saved = true; });
                 args.Cancel = !saved; form.Error.IsOpen = !saved; form.Error.Message = Feedback.Message;
-                if (saved) FeedbackMessage($"Settings saved for {ids.Length} accounts.", InfoBarSeverity.Success);
+                if (saved) FeedbackMessage($"Saved for {ids.Length} accounts.", InfoBarSeverity.Success);
             }
             finally { _saving = false; dialog.IsPrimaryButtonEnabled = true; content.IsHitTestVisible = true; deferral.Complete(); }
         };
@@ -194,7 +196,7 @@ public sealed partial class MainWindow
         if (((Button)sender).DataContext is AccountRow row) await GuardAsync(async () =>
         {
             await _api.SendAsync(HttpMethod.Post, $"accounts/{Uri.EscapeDataString(row.Id)}/repair");
-            FeedbackMessage($"Sign in to @{row.Account.Username}. A different account will be rejected. Settings will be retained.");
+            FeedbackMessage($"Sign in as @{row.Account.Username}; other accounts are rejected. Settings stay saved.");
         });
     }
     private async void SaveProfile_Click(object sender, RoutedEventArgs e) => await SaveProfileAsync(false);
@@ -202,7 +204,7 @@ public sealed partial class MainWindow
     private async Task SaveProfileAsync(bool replace)
     {
         var rows = PresetSelected(); var profile = ProfilePicker.SelectedItem as LaunchProfile;
-        if (rows.Length == 0 || replace && profile is null) { FeedbackMessage("Choose accounts in Create a preset and a saved preset when replacing."); return; }
+        if (rows.Length == 0 || replace && profile is null) { FeedbackMessage("Choose accounts; to replace, also choose a preset."); return; }
         if (replace && !await ConfirmAsync("Replace preset?", $"Replace {profile!.Name} with the current settings of {rows.Length} chosen accounts?", "Replace")) return;
         await GuardAsync(async () =>
         {
@@ -225,7 +227,7 @@ public sealed partial class MainWindow
     private async void ApplyProfile_Click(object sender, RoutedEventArgs e) => await ProfileActionAsync("apply");
     private async Task ProfileActionAsync(string action)
     {
-        if (ProfilePicker.SelectedItem is not LaunchProfile profile) { FeedbackMessage("Choose a saved preset first."); return; }
+        if (ProfilePicker.SelectedItem is not LaunchProfile profile) { FeedbackMessage("Choose a preset first."); return; }
         if (!await ReviewPresetAsync(profile, action)) return;
         await GuardAsync(async () =>
         {
@@ -241,7 +243,7 @@ public sealed partial class MainWindow
     }
     private async void DeleteProfile_Click(object sender, RoutedEventArgs e)
     {
-        if (ProfilePicker.SelectedItem is LaunchProfile profile && await ConfirmAsync("Delete profile?", $"Delete {profile.Name}? Its accounts will remain saved.", "Delete"))
+        if (ProfilePicker.SelectedItem is LaunchProfile profile && await ConfirmAsync("Delete preset?", $"Delete {profile.Name}? Its accounts will remain saved.", "Delete"))
             await GuardAsync(async () => { await _api.SendAsync(HttpMethod.Delete, $"profiles/{profile.Id}"); await RefreshAsync(); });
     }
     private async Task ExportJsonAsync(string name, object value)
@@ -256,7 +258,7 @@ public sealed partial class MainWindow
     private async void ExportDiagnostics_Click(object sender, RoutedEventArgs e) => await GuardAsync(async () => await ExportJsonAsync("rolauncher-support", await _api.GetAsync<JsonElement>("diagnostics")));
     private async void ExportProfiles_Click(object sender, RoutedEventArgs e)
     {
-        if (await ConfirmAsync("Export launch profiles?", "The file includes aliases, account IDs and private-server links. It contains no session cookies, API token or Discord webhook. Keep private links private.", "Export"))
+        if (await ConfirmAsync("Export presets?", "Includes aliases, account IDs, and private-server links. No cookies, API token, or webhook. Keep private links private.", "Export"))
             await GuardAsync(async () => await ExportJsonAsync("rolauncher-profiles", await _api.GetAsync<LaunchProfile[]>("profiles")));
     }
     private async void ImportProfiles_Click(object sender, RoutedEventArgs e) => await GuardAsync(async () =>
@@ -264,7 +266,7 @@ public sealed partial class MainWindow
         var picker = new Windows.Storage.Pickers.FileOpenPicker(); picker.FileTypeFilter.Add(".json");
         InitializePicker(picker);
         var file = await picker.PickSingleFileAsync(); if (file is null) return;
-        if (new FileInfo(file.Path).Length > 1024 * 1024) { FeedbackMessage("Profile file is too large.", InfoBarSeverity.Error); return; }
+        if (new FileInfo(file.Path).Length > 1024 * 1024) { FeedbackMessage("Preset file is too large.", InfoBarSeverity.Error); return; }
         LaunchProfile[]? profiles;
         try { profiles = JsonSerializer.Deserialize<LaunchProfile[]>(await File.ReadAllTextAsync(file.Path), ApiClient.JsonOptions); }
         catch (JsonException) { FeedbackMessage("Invalid profile file.", InfoBarSeverity.Error); return; }
@@ -275,7 +277,7 @@ public sealed partial class MainWindow
     private async void Restore_Click(object sender, RoutedEventArgs e)
     {
         if (BackupPicker.SelectedItem is not string name) { FeedbackMessage("Choose a backup first."); return; }
-        if (!await ConfirmAsync("Restore backup?", "Current accounts, profiles, activity and Discord settings will be replaced. A backup of the current state is created first. All restored accounts remain stopped. Your current API token is retained.", "Restore")) return;
+        if (!await ConfirmAsync("Restore backup?", "Replaces accounts, presets, activity, and Discord settings after backing up current data. Restored accounts stay stopped. Your API token is kept.", "Restore")) return;
         await GuardAsync(async () => { await _api.SendAsync(HttpMethod.Post, $"backups/{Uri.EscapeDataString(name)}/restore"); await RefreshAsync(); await RefreshBackupsAsync(); FeedbackMessage("Backup restored. Accounts are stopped.", InfoBarSeverity.Success); });
     }
 }

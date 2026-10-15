@@ -71,8 +71,8 @@ public sealed partial class MainWindow
                 _downloadedUpdate = await _updater.CachedAsync(view, _config.Version, _updateLifetime.Token);
                 UpdateNotice.IsOpen = true;
                 UpdateNotice.Visibility = Visibility.Visible;
-                UpdateNotice.Title = $"RoLauncher {view.Version}{(view.Prerelease ? " beta" : "")} is available";
-                SetUpdateMessage(_downloadedUpdate is null ? "Download the update, then relaunch when you’re ready." : "The update is downloaded and verified. Relaunch when you’re ready.");
+                UpdateNotice.Title = $"RoLauncher {view.Version}{(view.Prerelease ? " beta" : "")} available";
+                SetUpdateMessage(_downloadedUpdate is null ? "Download, then Relaunch to install." : "Verified. Relaunch to install.");
             }
             else
             {
@@ -80,8 +80,8 @@ public sealed partial class MainWindow
                 _downloadedUpdate = null;
                 UpdateNotice.IsOpen = false;
                 UpdateNotice.Visibility = Visibility.Collapsed;
-                UpdateStatus.Text = $"You’re up to date · v{_config.Version}";
-                if (manual) FeedbackMessage("RoLauncher is up to date.", InfoBarSeverity.Success);
+                UpdateStatus.Text = $"Up to date · v{_config.Version}";
+                if (manual) FeedbackMessage("Up to date.", InfoBarSeverity.Success);
             }
             UpdateReleaseNotesButton.IsEnabled = true;
         }
@@ -90,7 +90,7 @@ public sealed partial class MainWindow
         {
             if (!_disposed)
             {
-                UpdateStatus.Text = "Could not check for updates. RoLauncher will try again automatically.";
+                UpdateStatus.Text = "Update check failed. Will retry automatically.";
                 if (manual) FeedbackMessage(UpdateStatus.Text, InfoBarSeverity.Warning);
             }
         }
@@ -123,15 +123,15 @@ public sealed partial class MainWindow
         {
             var progress = new Progress<int>(percentage =>
             {
-                if (!_disposed && _downloadingUpdate && _downloadedUpdate is null) SetUpdateMessage(percentage < 0 ? "Downloading the update…" : $"Downloading the update… {percentage}%");
+                if (!_disposed && _downloadingUpdate && _downloadedUpdate is null) SetUpdateMessage(percentage < 0 ? "Downloading…" : $"Downloading… {percentage}%");
             });
             _downloadedUpdate = await _updater.DownloadAsync(_update, _config.Version, progress, _updateDownloadCancellation.Token);
-            if (!_disposed) SetUpdateMessage("The update is downloaded and verified. Relaunch when you’re ready; Roblox clients stay open.");
+            if (!_disposed) SetUpdateMessage("Verified. Relaunch to install; games stay open.");
         }
-        catch (OperationCanceledException) { if (!_disposed) SetUpdateMessage("Download cancelled. Your current version is still running."); }
+        catch (OperationCanceledException) { if (!_disposed) SetUpdateMessage("Download cancelled. Current version still running."); }
         catch (Exception ex) when (ex is HttpRequestException or InvalidDataException or IOException or UnauthorizedAccessException or ObjectDisposedException)
         {
-            if (!_disposed) { SetUpdateMessage("Could not download or verify the update. Try Download again."); FeedbackMessage(UpdateStatus.Text, InfoBarSeverity.Error); }
+            if (!_disposed) { SetUpdateMessage("Download or verification failed. Try Download again."); FeedbackMessage(UpdateStatus.Text, InfoBarSeverity.Error); }
         }
         finally
         {
@@ -142,11 +142,11 @@ public sealed partial class MainWindow
 
     private async Task ApplyDownloadedUpdateAsync()
     {
-        if (_modalOpen || _saving) { FeedbackMessage("Finish editing before applying the update."); return; }
+        if (_modalOpen || _saving) { FeedbackMessage("Finish editing before updating."); return; }
         _installingUpdate = true; CheckUpdatesButton.IsEnabled = false; UpdateActions();
         try
         {
-            SetUpdateMessage("Creating a backup and preparing the installer…");
+            SetUpdateMessage("Backing up and preparing installer…");
             await _api.SendAsync(HttpMethod.Post, "backups");
             await UpdateHandoff.PrepareAsync(_downloadedUpdate!, _config, _updateLifetime.Token);
             _exiting = true;
@@ -154,7 +154,7 @@ public sealed partial class MainWindow
         }
         catch (Exception ex) when (ex is ApiException or InvalidDataException or IOException or UnauthorizedAccessException or InvalidOperationException or System.ComponentModel.Win32Exception or HttpRequestException or OperationCanceledException)
         {
-            if (!_disposed) { SetUpdateMessage("Could not prepare the update. RoLauncher is still running; try Relaunch again."); FeedbackMessage(UpdateStatus.Text, InfoBarSeverity.Error); }
+            if (!_disposed) { SetUpdateMessage("Update preparation failed. App still running; try Relaunch again."); FeedbackMessage(UpdateStatus.Text, InfoBarSeverity.Error); }
         }
         finally
         {
@@ -166,7 +166,7 @@ public sealed partial class MainWindow
     private async void OpenUpdate_Click(object sender, RoutedEventArgs e)
     {
         if (_update is null) return;
-        await GuardAsync(async () => { if (!await Windows.System.Launcher.LaunchUriAsync(new Uri(_update.ReleaseUrl))) FeedbackMessage("Could not open the release notes.", InfoBarSeverity.Error); });
+        await GuardAsync(async () => { if (!await Windows.System.Launcher.LaunchUriAsync(new Uri(_update.ReleaseUrl))) FeedbackMessage("Cannot open release notes.", InfoBarSeverity.Error); });
     }
 
     private void DisposeUpdateResources()

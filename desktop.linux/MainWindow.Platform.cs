@@ -16,7 +16,6 @@ public sealed partial class MainWindow
         // from the visual tree; ShowAsync attaches it to its own popup when needed.
         Root.Children.Remove(_accountDialog);
         Root.Children.Remove(_presetLookupDialog);
-        BackupDescription.Text = BackupDescription.Text.Replace("Windows user", "Linux user", StringComparison.Ordinal);
         AppWindow.Resize(new Windows.Graphics.SizeInt32 { Width = 1180, Height = 940 });
         var window = new X11Visibility(this);
         var tray = new LinuxTray(() => DispatcherQueue.TryEnqueue(() => { window.Show(); AppWindow.Show(); Activate(); }),

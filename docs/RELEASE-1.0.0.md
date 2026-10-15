@@ -2,21 +2,14 @@
 
 First public installer release · 2026-10-06 · Windows x64
 
-## What's new
+- RoLauncher name/icon, per-user installer, shortcuts, uninstall, and portable package.
+- **Download → Relaunch** updates with backups; Roblox stays open.
+- Account groups, launch profiles, batch edits, recovery Dashboard, fallback policies, and history.
+- Encrypted backups; CI-built portable/source ZIPs, license notices, and SHA256 checksums.
+- Legacy RbxTools accounts/backups remain supported; the new accounts database takes priority, not an update cache.
+- Uninstall retains data. Installer is unsigned.
 
-- RoLauncher name and selected launch-arrow icon.
-- Per-user `.exe` installer, shortcuts, and uninstall support.
-- Automatic update checks: **Download → Relaunch** backs up data, installs, and reopens. Roblox stays open.
-- Account groups, saved launch profiles, and batch editing.
-- Recovery dashboard, fallback policies, activity history, and encrypted backups.
-- GitHub CI releases with portable/source ZIPs, license notices, and SHA256 checksums.
+Automated tests, installer checks, and package verification passed.
+Full live recovery, Discord delivery, and resource measurements remained unverified.
 
-## Existing data
-
-Legacy RbxTools accounts and backups remain supported. A download cache cannot hide legacy data; a RoLauncher accounts database takes priority. Uninstall retains saved data.
-
-## Validation
-
-Automated tests, installer checks, and package verification passed. Full real-client recovery, Discord delivery, and resource measurements remain unverified. The installer is unsigned.
-
-[User guide](https://github.com/oangsa/RoLauncher/blob/v1.0.0/docs/USAGE.md) · [Validation](https://github.com/oangsa/RoLauncher/blob/v1.0.0/docs/VALIDATION.md) · [Changelog](https://github.com/oangsa/RoLauncher/blob/v1.0.0/CHANGELOG.md)
+[Guide](https://github.com/oangsa/RoLauncher/blob/v1.0.0/docs/USAGE.md) · [Validation](https://github.com/oangsa/RoLauncher/blob/v1.0.0/docs/VALIDATION.md) · [Changelog](https://github.com/oangsa/RoLauncher/blob/v1.0.0/CHANGELOG.md)

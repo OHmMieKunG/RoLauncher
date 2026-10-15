@@ -16,14 +16,14 @@ public sealed class EditorDraft
     public bool TryTarget(out Target? target, out string error)
     {
         target = null;
-        error = "Enter a valid Place ID greater than zero.";
+        error = "Enter a Place ID greater than zero.";
         if (!ulong.TryParse(Place.Trim(), NumberStyles.None, CultureInfo.InvariantCulture, out var place) || place == 0) return false;
         var job = Job.Trim(); var link = Private.Trim();
         if (job.Length != 0 && link.Length != 0) { error = "Choose a Job ID or a private server link."; return false; }
-        if (job.Length != 0 && !Guid.TryParseExact(job, "D", out _)) { error = "Enter a valid server Job ID."; return false; }
+        if (job.Length != 0 && !Guid.TryParseExact(job, "D", out _)) { error = "Enter a valid Job ID."; return false; }
         if (link.Length != 0)
         {
-            error = "Enter a valid Roblox private server link matching the Place ID.";
+            error = "Enter a Roblox private server link matching the Place ID.";
             if (link.Length > 2048 || !Uri.TryCreate(link, UriKind.Absolute, out var uri) || uri.Scheme != "https" ||
                 uri.Host is not ("www.roblox.com" or "roblox.com") || uri.UserInfo.Length != 0 || !uri.IsDefaultPort) return false;
             var query = new Dictionary<string, string>();

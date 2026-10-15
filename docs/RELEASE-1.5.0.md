@@ -1,16 +1,37 @@
 # RoLauncher 1.5.0
 
-Release 2026-10-08. Changes since published stable 1.4.0. Linux remains a preview.
+2026-10-08 · Changes since stable 1.4.0. Linux remains a preview.
 
-- Account rows open the editor. A dedicated checkbox column selects accounts for bulk actions; the header selects visible accounts. Saved game cards open their editor too and highlight with a subtle lift on hover.
-- Optional Discord bot commands: `/action username action` with account autocomplete and Stop/Restart choices, and `/status-register channel` with ten accounts per page and Previous/Refresh/Next buttons. The registered message automatically updates when account data changes (checked every 15 seconds), retains its page, and resumes updates after reconnects or starting the bot again after an app restart. Save retains bot credentials without starting it; separate Start, Stop and Restart controls reuse saved settings, with green Online, yellow Starting and red Offline indicators. The bot resumes when the app launches if it was previously started; an explicit Stop keeps it off. Status uses green for online, grey for stopped, yellow for waiting/reconnecting, and red for errors or unknown monitoring state.
-- Account rows show elapsed running time and their saved longest online streak; Dashboard shows the longest streak and its account. Timing starts at the first confirmed connection, includes disconnects and automatic rejoins, and ends on Stop or manual Restart. Records survive app restarts.
-- Generic disconnect notifications wait through the existing 30-second reconnect grace, avoiding disconnect/back-online pairs during short redirects. Confirmed error codes still notify promptly. Stop and verified clean exits are silent.
-- Error notifications include the detected error summary/code, a game-name link when Roblox lookup succeeds, and a screenshot of the affected window when capture is available. Capture never falls back to the full desktop.
-- Linux launches explicitly set HOME inside Flatpak as well as on the host. Log monitoring reads verified open file descriptors across Flatpak mount namespaces and rejects descriptor reuse.
+- Click account rows/game cards to edit; use account checkboxes for bulk selection.
+- Discord `/action username action` supports Stop/Restart with autocomplete.
+- `/status-register channel` shows ten accounts/page with Previous/Refresh/Next; refreshes changed data every 15 seconds and retains page/message across reconnects/restarts.
+- Bot Save keeps credentials without starting; Start/Stop/Restart show Online/Starting/Offline. Previously started bots resume on app launch; explicit Stop keeps them off.
+- Account/Dashboard running-time records survive app restarts. Timing begins on confirmed connection, includes automatic rejoins, and ends on Stop/manual Restart.
+- Generic disconnect alerts wait through 30-second grace; confirmed errors notify promptly. Stop/clean exits are silent.
+- Error alerts include error/code, game link when available, and the affected window's screenshot.
+- Linux forwards HOME into Flatpak and reads verified logs across mount namespaces, rejecting reused descriptors.
 
-Bot setup: create a dedicated Discord application/bot, install it in your server with `bot` and `applications.commands` scopes, then save its token, server ID, and allowed Discord user IDs and click Start under Settings / Discord notifications. Give it View Channel, Send Messages and Embed Links in status channels. Leave the Discord Interactions Endpoint URL unset (the app uses Gateway events); only the unprivileged Guilds intent is needed; no public inbound listener is required. Notifications continue using the saved webhook. Tokens are encrypted locally and never returned by the settings API. Run one RoLauncher connection per bot token. If the bot is removed from the server, reinstall it and click Restart; credentials stay saved. Removing the local bot disconnects it; the registered commands remain on Discord until the application is removed from the server.
+## Bot setup
 
-Screenshots: Windows captures only the verified process's visible, non-minimized window. Linux capture requires Python 3, libX11, libXres and libXcomposite and a composited X11/XWayland window whose host PID XRes can verify. Native Wayland windows, closed/minimized windows, missing libraries, protected GPU surfaces or ambiguous ownership produce a text-only alert with an explanation. Screenshots are held in memory; they are not written to disk. A crash that has already destroyed its window cannot be photographed.
+1. Create a dedicated Discord bot; install with `bot` and `applications.commands` scopes.
+2. Save token, server ID, and allowed user IDs under Discord settings; press Start.
+3. Grant View Channel, Send Messages, and Embed Links in status channels.
 
-Validation: 65 Windows Rust tests passed (one desktop bootstrap test is intentionally ignored in the regular suite), Clippy passed with warnings denied, and the desktop UI smoke and 71 model/editor/update checks passed. The versioning and beta-publishing fixture checks passed. Discord pagination fixtures cover unique component IDs at every page boundary, backwards-compatible buttons, and safe error classification. The Python isolation adapter and Linux update checks passed under Arch WSL, along with 64 Linux Rust tests and Clippy with warnings denied. The separate Windows Rust/WinUI bootstrap, isolated installer/update handoff and packaged desktop checks also passed. Native Arch/KDE multi-instance stability, status attribution and live screenshots still need verification with actual Sober games. A live Discord bot/webhook test also requires user configuration; no messages are sent during local fixtures.
+- Leave Interactions Endpoint URL unset; Gateway events need only the unprivileged Guilds intent and no inbound listener.
+- Webhooks still deliver notifications. Tokens stay encrypted and are never returned by the settings API.
+- Run one connection per bot token; if removed from the server, reinstall and Restart.
+- Local removal disconnects the bot; Discord commands remain until the application is removed from the server.
+
+## Screenshots
+
+- Windows: only the verified process's visible, non-minimized window.
+- Linux: Python 3, libX11/libXres/libXcomposite, composited X11/XWayland, and XRes-verified host PID.
+- Native Wayland, protected/minimized/closed windows, missing libraries, or ambiguous ownership yield explained text-only alerts.
+- No desktop-wide fallback; screenshots stay in memory. Destroyed windows cannot be captured.
+
+## Validation
+
+- Windows: 65 Rust tests, separate bootstrap, Clippy, UI smoke, 71 desktop checks, installer/package checks, and versioning/beta fixtures passed.
+- Discord fixtures covered pagination IDs, legacy buttons, and error classification; no live messages were sent.
+- Arch WSL: 64 Rust tests, Clippy, isolation adapter, and Linux updater checks passed.
+- Native KDE concurrent games, status/screenshot attribution, and live configured Discord delivery remain unverified.

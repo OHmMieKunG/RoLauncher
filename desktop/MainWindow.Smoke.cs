@@ -140,7 +140,7 @@ public sealed partial class MainWindow
             AssertUpdateButtonLayout();
             _downloadingUpdate = true;
             UpdateActions();
-            SetUpdateMessage("Downloading the update… 40%");
+            SetUpdateMessage("Downloading… 40%");
             await CaptureAsync(directory, "update-downloading.png");
             AssertUpdateButtonLayout();
             _downloadingUpdate = false;
@@ -175,7 +175,7 @@ public sealed partial class MainWindow
             var pageHeight = SettingsPage.ActualHeight;
             WebhookTest_Click(SettingsTab, new RoutedEventArgs());
             await Task.Delay(150);
-            Assert(Feedback.IsOpen && Feedback.Message == "Test queued. Check recent activity for delivery status.", "Send test displays the toast.");
+            Assert(Feedback.IsOpen && Feedback.Message == "Test queued. See Recent activity for delivery.", "Send test displays the toast.");
             var toastPosition = Feedback.TransformToVisual(Root).TransformPoint(new Windows.Foundation.Point());
             Assert(toastPosition.Y == 12 && Math.Abs(toastPosition.X + Feedback.ActualWidth / 2 - (Root.ActualWidth + Root.ColumnDefinitions[0].ActualWidth) / 2) < 1,
                 "Toast overlays the top center of the window.");
@@ -421,7 +421,7 @@ public sealed partial class MainWindow
             // Saving a preset must use its target, regardless of stale manual field contents.
             PlaceInput.Text = "";
             InvokeDialogButton("PrimaryButton"); await modal.WaitAsync(TimeSpan.FromSeconds(5));
-            Assert(_rows[0].Account.Target!.PlaceId == 123, "Account save applies a saved game.");
+            Assert(_rows[0].Account.Target!.PlaceId == 123 && _rows[0].Account.GameProfileId == _gameProfiles[0].Id, "Account save applies a saved game and its identity.");
             modal = ShowAccountAsync(_rows[0]); await Task.Delay(300);
             Assert(DialogGame.SelectedItem is GameProfile && !PlaceInput.IsEnabled,
                 "Reopening an account detects its saved destination and keeps it locked.");
@@ -431,6 +431,14 @@ public sealed partial class MainWindow
             CloseBehavior.SelectedIndex = 1; await Task.Delay(300);
             Assert(!_closeToTray && !(await _api.GetAsync<Snapshot>("status")).CloseToTray, "Close preference saves through the API.");
             CloseBehavior.SelectedIndex = 0; await Task.Delay(300);
+            Tab_Click(SettingsTab, new RoutedEventArgs()); await Task.Delay(250);
+            ServerSelector.SelectedIndex = 2; await Task.Delay(300);
+            GameJoinType.SelectedIndex = 0; await Task.Delay(300);
+            var gameSettings = await _api.GetAsync<Snapshot>("status");
+            Assert(gameSettings.ServerSelection == "highest" && gameSettings.JoinType == "friend", "Game preferences save through the API.");
+            await CaptureAsync(directory, "game-joining-settings.png");
+            ServerSelector.SelectedIndex = 0; await Task.Delay(300);
+            GameJoinType.SelectedIndex = 1; await Task.Delay(300);
             Tab_Click(AccountsTab, new RoutedEventArgs());
             var bulk = ShowBulkAsync([_rows[0], _rows[2]]);
             await Task.Delay(450);
@@ -625,7 +633,7 @@ public sealed partial class MainWindow
             await CaptureAsync(directory, "dashboard-small.png");
             Assert(RecoveryPage.ActualWidth <= PageScroll.ActualWidth - PageScroll.Padding.Left - PageScroll.Padding.Right + 1 && StatusBreakdown.ActualWidth > 0, "Dashboard chart fits the smaller window.");
             Tab_Click(AccountsTab, new RoutedEventArgs());
-            FeedbackMessage("Test queued. Check recent activity for delivery status.");
+            FeedbackMessage("Test queued. See Recent activity for delivery.");
             await CaptureAsync(directory, "toast-small.png");
             Assert(Feedback.ActualWidth <= 640 && Feedback.IsOpen, "Toast remains compact in a smaller window.");
             Feedback.IsOpen = false;
