@@ -18,6 +18,7 @@ use tokio::sync::{Notify, broadcast};
 use uuid::Uuid;
 
 mod management;
+mod server_selection;
 pub use management::{BulkPatch, ProfileSave};
 
 #[derive(Clone)]
@@ -102,6 +103,7 @@ fn attach_verified_player(account: &mut Account, identity: ProcessIdentity) {
 pub struct AccountPatch {
     pub alias: Option<String>,
     pub target: Option<Target>,
+    pub game_profile_id: Option<Uuid>,
     pub auto_recovery: Option<bool>,
     pub fallback_policy: Option<FallbackPolicy>,
     pub group: Option<String>,
@@ -466,6 +468,7 @@ impl Engine {
     pub fn patch(&self, id: &str, patch: AccountPatch) -> Result<Account, String> {
         management::validate_patch(&patch)?;
         self.transaction(|s| {
+            management::validate_game_assignment(&s.database, &patch)?;
             let a = account_mut(s, id)?;
             management::apply_patch(a, patch);
             Ok(a.clone())
@@ -730,6 +733,42 @@ impl Engine {
         {
             return;
         }
+        let target = match tokio::time::timeout(
+            Duration::from_secs(30),
+            self.select_launch_target(&account, target, &cookie),
+        )
+        .await
+        {
+            Ok(Ok(Some(target))) => target,
+            Ok(Ok(None)) => {
+                let _ = self.update(&account.id, account.generation, |a| {
+                    if a.desired_running {
+                        if account.status == Status::Backoff && !a.auto_recovery {
+                            a.status = Status::NeedsAttention;
+                            a.next_retry = None;
+                            a.last_error = Some(REJOIN_DISABLED.into());
+                            return;
+                        }
+                        a.status = account.status.clone();
+                        a.next_retry = Some(Utc::now() + ChronoDuration::seconds(5));
+                        a.last_error =
+                            Some("Waiting for a same-preset account to finish joining".into());
+                    }
+                });
+                return;
+            }
+            result => {
+                let error = match result {
+                    Ok(Err(error)) => error,
+                    _ => Failure::new(
+                        FailureKind::Network,
+                        "Server selection timed out; retrying when Roblox is reachable",
+                    ),
+                };
+                self.failure(&account.id, account.generation, error);
+                return;
+            }
+        };
         let uri = match self.0.roblox.launch_uri(&cookie, &target, &tracker).await {
             Ok(uri) => uri,
             Err(e) => {
@@ -1032,7 +1071,10 @@ impl Engine {
                 });
                 self.finish_operation(id, generation, None);
             }
-            Signal::Disconnected | Signal::ConnectionFailed | Signal::SessionLost(_) => {
+            Signal::Disconnected
+            | Signal::ConnectionFailed
+            | Signal::JoinRequestFailed
+            | Signal::SessionLost(_) => {
                 let _ = self.update(id, generation, |a| {
                     if a.desired_running && a.status != Status::NeedsAttention {
                         if a.disconnected_since.is_none() {
@@ -1045,6 +1087,9 @@ impl Engine {
                         if signal == Signal::ConnectionFailed && !kick_known {
                             a.recovery_reason = "ConnectionFailed".into();
                             a.last_error = Some("Connection failed: server did not respond (279); allowing 30 seconds to reconnect before recovery".into());
+                        } else if signal == Signal::JoinRequestFailed && !kick_known {
+                            a.recovery_reason = "JoinRequestFailed".into();
+                            a.last_error = Some("Join request failed (HTTP/network error); allowing 30 seconds to retry before recovery".into());
                         } else if let Signal::SessionLost(code) = signal && !kick_known {
                             a.recovery_reason = if code == Some(267) { "Kick267" } else { "SessionLost" }.into();
                             a.last_error = Some(match code {
@@ -1084,6 +1129,8 @@ fn account_mut<'a>(s: &'a mut State, id: &str) -> Result<&'a mut Account, String
 }
 fn snapshot(s: &State) -> Snapshot {
     Snapshot {
+        server_selection: s.database.server_selection,
+        join_type: s.database.join_type,
         game_profiles: s.database.game_profiles.clone(),
         close_to_tray: s.database.close_to_tray,
         accounts: s
@@ -1436,6 +1483,73 @@ mod tests {
         engine.command("1", "stop").unwrap();
         engine.signal("1", before.generation, Signal::ConnectionFailed);
         assert_eq!(engine.snapshot().accounts[0].status, Status::Stopped);
+        drop(engine);
+        std::fs::remove_dir_all(path).unwrap();
+    }
+    #[cfg(any(windows, target_os = "linux"))]
+    #[test]
+    fn unknown_client_handles_confirmed_join_error_before_connecting() {
+        let (engine, path) = fixture(1);
+        for (line, error) in [
+            ("[FLog::GameJoinUtil] GameJoinFailed errorCode: 529", "529"),
+            (
+                "[DFLog::HttpTraceError] HttpResponse(#19) error:5 message:HttpError: Timedout url:{ \"https://gamejoin.roblox.com/v1/join-game-instance\" }",
+                "Join request failed",
+            ),
+            (
+                "[FLog::HttpTraceError] HttpResponse(#1) status:503 Service Unavailable url:{ \"https://gamejoin.roblox.com/v1/join-private-game\" }",
+                "Join request failed",
+            ),
+        ] {
+            engine.command("1", "start").unwrap();
+            let before = engine.snapshot().accounts.remove(0);
+            let generation = before.generation;
+            engine
+                .update("1", generation, |a| a.status = Status::Unknown)
+                .unwrap();
+            let log = path.join("Player.log");
+            std::fs::write(&log, format!("{line}\n")).unwrap();
+            let mut tail = crate::logs::Tail::new(log, false).unwrap();
+            let signals = tail.read().unwrap();
+            assert_eq!(signals.len(), 1);
+            let signal = signals[0];
+            engine.signal("1", generation, signal);
+            let failed = engine.snapshot().accounts.remove(0);
+            assert_eq!(failed.status, Status::Reconnecting);
+            assert!(failed.last_error.as_deref().unwrap().contains(error));
+            assert!(!failed.last_error.as_deref().unwrap().contains("roblox.com"));
+            assert_eq!(failed.target, before.target);
+            assert!(!failed.public_fallback_active);
+            assert_eq!(failed.failures, 0);
+            let start = failed.disconnected_since.unwrap();
+            assert!(!recovery_due(&failed, start + ChronoDuration::seconds(29)));
+            assert!(recovery_due(&failed, start + ChronoDuration::seconds(30)));
+            engine.signal("1", generation, signal);
+            assert_eq!(
+                engine.snapshot().accounts[0].disconnected_since,
+                Some(start)
+            );
+            engine
+                .update("1", generation, |a| a.auto_recovery = false)
+                .unwrap();
+            assert!(!recovery_due(
+                &engine.snapshot().accounts[0],
+                start + ChronoDuration::seconds(30)
+            ));
+            engine
+                .update("1", generation, |a| a.auto_recovery = true)
+                .unwrap();
+            engine.signal("1", generation, Signal::Connected);
+            let connected = engine.snapshot().accounts.remove(0);
+            assert_eq!(connected.status, Status::Running);
+            assert!(!recovery_due(
+                &connected,
+                start + ChronoDuration::seconds(30)
+            ));
+            engine.command("1", "stop").unwrap();
+            engine.signal("1", generation, signal);
+            assert_eq!(engine.snapshot().accounts[0].status, Status::Stopped);
+        }
         drop(engine);
         std::fs::remove_dir_all(path).unwrap();
     }
@@ -1987,6 +2101,239 @@ mod tests {
         reopened.restore(&backup).unwrap();
         assert_eq!(reopened.snapshot().game_profiles.len(), 1);
         assert!(!reopened.snapshot().close_to_tray);
+        drop(reopened);
+        std::fs::remove_dir_all(path).unwrap();
+    }
+    #[tokio::test]
+    async fn friend_join_uses_managed_peer_session_when_viewer_presence_is_hidden() {
+        use axum::{
+            Json, Router,
+            http::{HeaderMap, StatusCode},
+            routing::post,
+        };
+        let place = Arc::new(AtomicU64::new(1));
+        let requests = Arc::new(AtomicU64::new(0));
+        let app = Router::new().route(
+            "/presence",
+            post({
+                let place = place.clone();
+                let requests = requests.clone();
+                move |headers: HeaderMap, Json(body): Json<serde_json::Value>| {
+                    let place = place.clone();
+                    let requests = requests.clone();
+                    async move {
+                        requests.fetch_add(1, Ordering::Relaxed);
+                        assert_eq!(body["userIds"], serde_json::json!([2]));
+                        let own = headers["cookie"] == ".ROBLOSECURITY=PEER_TEST_SESSION";
+                        if own && place.load(Ordering::Relaxed) == 0 {
+                            return (StatusCode::UNAUTHORIZED, Json(serde_json::json!({})));
+                        }
+                        (
+                            StatusCode::OK,
+                            Json(serde_json::json!({"userPresences": [{
+                                "userId": 2, "userPresenceType": if own { 2 } else { 0 },
+                                "placeId": own.then(|| place.load(Ordering::Relaxed)),
+                                "gameId": own.then_some("00000000-0000-0000-0000-000000000002")
+                            }]})),
+                        )
+                    }
+                }
+            }),
+        );
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let url = format!("http://{}/presence", listener.local_addr().unwrap());
+        let server = tokio::spawn(async move { axum::serve(listener, app).await.unwrap() });
+        let (mut engine, path) = fixture(2);
+        Arc::get_mut(&mut engine.0).unwrap().roblox.presence_url = Some(url);
+        engine
+            .transaction(|s| {
+                s.database.join_type = JoinType::Friend;
+                let profile = Uuid::new_v4();
+                for saved in &mut s.database.accounts {
+                    saved.account.game_profile_id = Some(profile);
+                    saved.account.desired_running = true;
+                }
+                let peer = &mut s.database.accounts[1];
+                peer.encrypted_session = platform::protect("PEER_TEST_SESSION")?;
+                peer.account.status = Status::Running;
+                peer.account.tracker = Some("peer-tracker".into());
+                Ok(())
+            })
+            .unwrap();
+        let account = engine.snapshot().accounts[0].clone();
+        let target = account.effective_target().unwrap();
+        let selected = engine
+            .select_launch_target(&account, target.clone(), "JOINING_TEST_SESSION")
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(selected.job_id.unwrap().as_u128(), 2);
+        assert_eq!(requests.load(Ordering::Relaxed), 2);
+
+        // A peer in another place must not pull the follower out of its configured game.
+        place.store(99, Ordering::Relaxed);
+        let error = engine
+            .select_launch_target(&account, target.clone(), "JOINING_TEST_SESSION")
+            .await
+            .unwrap_err();
+        assert!(error.message.contains("Same-preset server"));
+        engine
+            .transaction(|s| {
+                s.database.accounts[1].account.ownership_deadline =
+                    Some(Utc::now() + ChronoDuration::seconds(90));
+                Ok(())
+            })
+            .unwrap();
+        assert!(
+            engine
+                .select_launch_target(&account, target.clone(), "JOINING_TEST_SESSION")
+                .await
+                .unwrap()
+                .is_none()
+        );
+        // An expired peer session must not request reauthentication of the follower.
+        engine
+            .transaction(|s| {
+                s.database.accounts[1].account.ownership_deadline = None;
+                Ok(())
+            })
+            .unwrap();
+        place.store(0, Ordering::Relaxed);
+        let error = engine
+            .select_launch_target(&account, target.clone(), "JOINING_TEST_SESSION")
+            .await
+            .unwrap_err();
+        assert_eq!(error.kind, FailureKind::Other);
+        // Unreadable peer credentials must not blame the joining account's valid session.
+        engine
+            .transaction(|s| {
+                s.database.accounts[1].account.ownership_deadline = None;
+                s.database.accounts[1].encrypted_session = "unreadable".into();
+                Ok(())
+            })
+            .unwrap();
+        let error = engine
+            .select_launch_target(&account, target, "JOINING_TEST_SESSION")
+            .await
+            .unwrap_err();
+        assert_eq!(error.kind, FailureKind::Other);
+        server.abort();
+        engine.shutdown();
+        drop(engine);
+        std::fs::remove_dir_all(path).unwrap();
+    }
+    #[tokio::test]
+    async fn saved_game_identity_survives_presets_and_explicit_destinations_bypass_selection() {
+        let (engine, path) = fixture(2);
+        engine
+            .transaction(|s| {
+                for saved in &mut s.database.accounts {
+                    saved.encrypted_session = platform::protect("TEST_ONLY_SESSION")?;
+                }
+                Ok(())
+            })
+            .unwrap();
+        let target = Target {
+            place_id: 1818,
+            job_id: None,
+            private_server_link: None,
+        };
+        let game = GameProfile {
+            id: Uuid::new_v4(),
+            name: "Team game".into(),
+            game_name: "Game".into(),
+            thumbnail_url: None,
+            target: target.clone(),
+        };
+        engine.save_game_profile(game.clone()).unwrap();
+        let assign = AccountPatch {
+            target: Some(target.clone()),
+            game_profile_id: Some(game.id),
+            ..Default::default()
+        };
+        engine
+            .bulk_patch(BulkPatch {
+                account_ids: vec!["1".into(), "2".into()],
+                patch: assign.clone(),
+            })
+            .unwrap();
+        let preset = engine
+            .save_profile(ProfileSave {
+                name: "Team".into(),
+                account_ids: vec!["1".into(), "2".into()],
+                id: None,
+            })
+            .unwrap();
+        assert_eq!(preset.entries[0].game_profile_id, Some(game.id));
+        engine
+            .patch(
+                "1",
+                AccountPatch {
+                    target: Some(target.clone()),
+                    ..Default::default()
+                },
+            )
+            .unwrap();
+        assert!(engine.snapshot().accounts[0].game_profile_id.is_none());
+        assert_eq!(
+            engine.apply_profile(preset.id).unwrap()[0].game_profile_id,
+            Some(game.id)
+        );
+        let mut invalid = assign.clone();
+        invalid.game_profile_id = Some(Uuid::new_v4());
+        assert!(
+            engine
+                .bulk_patch(BulkPatch {
+                    account_ids: vec!["1".into(), "2".into()],
+                    patch: invalid
+                })
+                .is_err()
+        );
+        let mut invalid = assign;
+        invalid.target.as_mut().unwrap().place_id = 99;
+        assert!(engine.patch("1", invalid).is_err());
+        engine
+            .set_game_settings(ServerSelection::Highest, JoinType::Friend)
+            .unwrap();
+        let account = engine.snapshot().accounts[0].clone();
+        for explicit in [
+            Target {
+                job_id: Some(Uuid::new_v4()),
+                ..target.clone()
+            },
+            Target {
+                private_server_link: Some(
+                    "https://www.roblox.com/games/1818?privateServerLinkCode=abc".into(),
+                ),
+                ..target.clone()
+            },
+        ] {
+            assert_eq!(
+                engine
+                    .select_launch_target(&account, explicit.clone(), "invalid-test-cookie")
+                    .await
+                    .unwrap(),
+                Some(explicit)
+            );
+        }
+        let backup = engine.backup().unwrap();
+        engine.delete_game_profile(game.id).unwrap();
+        assert!(
+            engine
+                .snapshot()
+                .accounts
+                .iter()
+                .all(|a| a.game_profile_id.is_none())
+        );
+        engine.restore(&backup).unwrap();
+        assert_eq!(engine.snapshot().accounts[0].game_profile_id, Some(game.id));
+        drop(engine);
+        let reopened = Engine::open(Store::new(path.clone()).unwrap(), "simulated".into()).unwrap();
+        assert_eq!(
+            reopened.snapshot().accounts[1].game_profile_id,
+            Some(game.id)
+        );
+        assert_eq!(reopened.snapshot().join_type, JoinType::Friend);
         drop(reopened);
         std::fs::remove_dir_all(path).unwrap();
     }

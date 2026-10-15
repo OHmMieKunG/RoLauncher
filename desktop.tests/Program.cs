@@ -80,8 +80,14 @@ Check(bulk.TryPatch(out patch, out _) && (string)patch["alias"]! == bulk.Fields.
 bulk.ApplyRejoin = true; bulk.Rejoin = false; bulk.ApplyFallback = true; bulk.Fallback = "pause";
 Check(bulk.TryPatch(out patch, out _) && (bool)patch["auto_recovery"]! == false && (string)patch["fallback_policy"]! == "pause", "Explicit false and pause policy are preserved.");
 Check(!new BulkDraft().TryPatch(out _, out _), "Empty bulk edits require an Apply setting.");
+var gameId = Guid.NewGuid().ToString();
+var gameBulk = new BulkDraft { ApplyTarget = true, GameProfileId = gameId, Fields = new() { Place = "1818" } };
+Check(gameBulk.TryPatch(out var gamePatch, out _) && (string)gamePatch["game_profile_id"]! == gameId, "Bulk saved-game assignments preserve preset identity.");
+gameBulk.ClearTarget = true;
+Check(gameBulk.TryPatch(out gamePatch, out _) && !gamePatch.ContainsKey("game_profile_id"), "Clearing a destination also clears its saved-game assignment.");
+Check(snapshot.ServerSelection == "smart" && snapshot.JoinType == "random" && snapshot.Accounts[0].GameProfileId is null, "Older snapshots use compatible game-joining defaults.");
 var retrying = new AccountRow(account with { Status = "backoff", NextRetry = DateTimeOffset.UtcNow.AddMinutes(1), DesiredRunning = true });
-Check(retrying.CanRetry && retrying.Retry.Contains("Next retry"), "Scheduled retries expose a countdown and Retry now.");
+Check(retrying.CanRetry && retrying.Retry.Contains("Retry in"), "Scheduled retries expose a countdown and Retry now.");
 retrying.Update(retrying.Account with { RecoveryReason = "RateLimit" });
 Check(!retrying.CanRetry, "Rate-limit cooldown disables Retry now.");
 await UpdateDownloadTests.RunAsync(Check);

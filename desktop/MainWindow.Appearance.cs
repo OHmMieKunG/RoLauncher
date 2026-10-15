@@ -251,7 +251,7 @@ public sealed partial class MainWindow
     {
         if (PresetAccounts is null || SavePresetButton is null || ProfilePicker is null) return;
         var count = PresetSelected().Length;
-        PresetSelectionSummary.Text = $"{count} accounts chosen · saves their current settings";
+        PresetSelectionSummary.Text = $"{count} accounts chosen";
         var lookupCount = PresetLookupIds.Count;
         var hidden = _rows.Count(row => PresetLookupIds.Contains(row.Id) && !_presetVisibleRows.Contains(row));
         PresetLookupSummary.Text = $"{_presetVisibleRows.Count} of {_rows.Count} shown · {lookupCount} selected" + (hidden > 0 ? $" ({hidden} hidden by filters)" : "");
@@ -260,8 +260,8 @@ public sealed partial class MainWindow
         var profile = ProfilePicker.SelectedItem as LaunchProfile;
         LaunchPresetButton.IsEnabled = ApplyPresetButton.IsEnabled = DeletePresetButton.IsEnabled = profile is not null;
         ReplacePresetButton.IsEnabled = profile is not null && count > 0;
-        ProfileSummary.Text = profile is null ? "Choose a saved preset, or create one below."
-            : $"{profile.Entries.Length} accounts · {profile.Entries.Count(e => e.AutoRecovery)} with rejoin on\n" + string.Join(" · ", profile.Entries.Select(e => e.Alias));
+        ProfileSummary.Text = profile is null ? "Choose or create a preset."
+            : $"{profile.Entries.Length} accounts · {profile.Entries.Count(e => e.AutoRecovery)} rejoin on\n" + string.Join(" · ", profile.Entries.Select(e => e.Alias));
     }
     private void DangerControl_Loaded(object sender, RoutedEventArgs e)
     {
@@ -292,7 +292,7 @@ public sealed partial class MainWindow
     private ContentDialog CreatePresetReview(LaunchProfile profile, string action)
     {
         var content = new StackPanel { Spacing = 12 };
-        content.Children.Add(new TextBlock { Text = $"{profile.Entries.Length} accounts · Review saved settings", Style = (Style)Application.Current.Resources["Caption"] });
+        content.Children.Add(new TextBlock { Text = $"{profile.Entries.Length} accounts", Style = (Style)Application.Current.Resources["Caption"] });
         var accounts = new StackPanel { Spacing = 10 };
         foreach (var entry in profile.Entries)
         {
@@ -315,7 +315,7 @@ public sealed partial class MainWindow
             }
         }
         content.Children.Add(new ScrollViewer { Content = accounts, MaxHeight = 360, VerticalScrollBarVisibility = ScrollBarVisibility.Auto, HorizontalScrollBarVisibility = ScrollBarVisibility.Disabled });
-        content.Children.Add(new TextBlock { Text = "These saved settings will replace the accounts’ current settings. Running clients stay open. Changed destinations take effect on the next launch.", TextWrapping = TextWrapping.Wrap, FontSize = 13 });
+        content.Children.Add(new TextBlock { Text = "Replaces current settings. Games stay open; destinations change on the next launch.", TextWrapping = TextWrapping.Wrap, FontSize = 13 });
         var dialog = new ContentDialog { XamlRoot = Root.XamlRoot, Title = $"Review {profile.Name}", Content = content, PrimaryButtonText = action == "start" ? "Apply and start" : "Apply settings", CloseButtonText = "Cancel", DefaultButton = ContentDialogButton.Close };
         dialog.Resources["ContentDialogMaxWidth"] = 640d;
         ApplyDialogTheme(dialog);

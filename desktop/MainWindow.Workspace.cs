@@ -54,7 +54,7 @@ public sealed partial class MainWindow
                 if (current is FrameworkElement { DataContext: AccountRow account }) return account;
             }
         }
-        FeedbackMessage("Account no longer available. Refresh and try again.", InfoBarSeverity.Warning);
+        FeedbackMessage("Account unavailable. Refresh and retry.", InfoBarSeverity.Warning);
         return null;
     }
     private async void RepairSelected_Click(object sender, RoutedEventArgs e)
@@ -63,7 +63,7 @@ public sealed partial class MainWindow
         if (selected.Length != 1) { FeedbackMessage("Select one account to sign in again."); return; }
         await GuardAsync(async () => {
             await _api.SendAsync(HttpMethod.Post, $"accounts/{selected[0].Id}/repair");
-            FeedbackMessage($"Sign in to {selected[0].Username}. Account settings will be retained.");
+            FeedbackMessage($"Sign in as {selected[0].Username}. Settings stay saved.");
         });
     }
     private readonly Dictionary<ulong, (string? Name, DateTimeOffset RetryAfter)> _gameNames = [];
@@ -103,6 +103,13 @@ public sealed partial class MainWindow
         _syncingWindowSettings = true;
         CloseBehavior.SelectedIndex = _closeToTray ? 0 : 1;
         _syncingWindowSettings = false; _windowSettingsReady = true;
+        if (!_savingGameSettings)
+        {
+            _syncingGameSettings = true;
+            ServerSelector.SelectedIndex = snapshot.ServerSelection switch { "lowest" => 1, "highest" => 2, _ => 0 };
+            GameJoinType.SelectedIndex = snapshot.JoinType == "friend" ? 0 : 1;
+            _syncingGameSettings = false; _gameSettingsReady = true;
+        }
         var profiles = snapshot.GameProfiles ?? [];
         var fingerprint = JsonSerializer.Serialize(profiles);
         if (_gamesFingerprint != fingerprint)
@@ -119,23 +126,23 @@ public sealed partial class MainWindow
             .Select(a => _rows.FirstOrDefault(r => r.Id == a.Id) ?? new AccountRow(a)).ToArray();
         var pending = accounts.Count(a => a.Status is "queued" or "launching");
         var stopped = accounts.Count(a => a.Status == "stopped");
-        DashboardCounts.Text = $"Live account overview · updated {DateTimeOffset.Now:HH:mm:ss}";
+        DashboardCounts.Text = $"Updated {DateTimeOffset.Now:HH:mm:ss}";
         TotalMetric.Text = total.ToString(); TotalHint.Text = $"{_gameProfiles.Length} saved games";
         RunningMetric.Text = running.ToString(); RunningHint.Text = $"{pending} queued or launching";
-        RejoiningMetric.Text = rejoining.ToString(); RejoiningHint.Text = "Reconnect grace or retry wait";
-        AttentionMetric.Text = attention.Length.ToString(); AttentionHint.Text = "Paused or unverified status";
+        RejoiningMetric.Text = rejoining.ToString(); RejoiningHint.Text = "Waiting to reconnect or retry";
+        AttentionMetric.Text = attention.Length.ToString(); AttentionHint.Text = "Paused or unverified";
         var longest = _rows.OrderByDescending(row => row.LongestSeconds).FirstOrDefault();
         LongestStreakMetric.Text = longest is null ? "—" : AccountRow.FormatDuration(longest.LongestSeconds);
-        LongestStreakHint.Text = longest is null || longest.LongestSeconds == 0 ? "No recorded streak yet" : $"{longest.Alias} · @{longest.Account.Username}";
+        LongestStreakHint.Text = longest is null || longest.LongestSeconds == 0 ? "No streak recorded" : $"{longest.Alias} · @{longest.Account.Username}";
         var covered = accounts.Count(a => a.AutoRecovery && a.Target is not null);
         CoverageMetric.Text = total == 0 ? "—" : $"{covered * 100.0 / total:0}%";
         CoverageBar.Value = total == 0 ? 0 : covered * 100.0 / total;
-        CoverageHint.Text = $"{covered} of {total} accounts have automatic rejoin enabled and a destination.";
+        CoverageHint.Text = $"{covered}/{total} accounts ready for rejoin";
         DestinationSummary.Text = $"{accounts.Count(a => a.Target is null)} without a destination · {accounts.Count(a => a.PublicFallbackActive)} using public fallback";
-        NetworkSummary.Text = snapshot.NetworkSuspended ? "Network unavailable · launches and rejoins waiting" : "Network available";
+        NetworkSummary.Text = snapshot.NetworkSuspended ? "Network unavailable · launches and rejoins paused" : "Network available";
         RecoveryList.ItemsSource = attention;
         AttentionEmpty.Visibility = attention.Length == 0 ? Visibility.Visible : Visibility.Collapsed;
-        AttentionSummary.Text = attention.Length == 0 ? "All clear" : $"{attention.Length} accounts · select an account to inspect or edit";
+        AttentionSummary.Text = attention.Length == 0 ? "All clear" : $"{attention.Length} accounts · click to edit";
         var statusCounts = new[] { running, pending, rejoining, attention.Length, stopped };
         if (_statusMeters.Count == 0)
         {
@@ -167,6 +174,17 @@ public sealed partial class MainWindow
         if (!_windowSettingsReady || _syncingWindowSettings) return;
         var choice = CloseBehavior.SelectedIndex == 0;
         await GuardAsync(async () => { await _api.SendAsync(HttpMethod.Patch, "settings/window", new { close_to_tray = choice }); _closeToTray = choice; });
+        await RefreshAsync();
+    }
+    private bool _syncingGameSettings, _gameSettingsReady, _savingGameSettings;
+    private async void GameSettings_Changed(object sender, SelectionChangedEventArgs e)
+    {
+        if (!_gameSettingsReady || _syncingGameSettings || _savingGameSettings) return;
+        var selection = ServerSelector.SelectedIndex switch { 1 => "lowest", 2 => "highest", _ => "smart" };
+        var join = GameJoinType.SelectedIndex == 0 ? "friend" : "random";
+        _savingGameSettings = true; ServerSelector.IsEnabled = GameJoinType.IsEnabled = false;
+        try { await GuardAsync(async () => await _api.SendAsync(HttpMethod.Patch, "settings/game", new { server_selection = selection, join_type = join })); }
+        finally { _savingGameSettings = false; ServerSelector.IsEnabled = GameJoinType.IsEnabled = true; }
         await RefreshAsync();
     }
     private void DialogGame_Changed(object sender, SelectionChangedEventArgs e)
@@ -223,7 +241,7 @@ public sealed partial class MainWindow
     private async void DeleteGame_Click(object sender, RoutedEventArgs e)
     {
         var profile = _gameProfiles.FirstOrDefault(p => p.Id == ((FrameworkElement)sender).Tag as string);
-        if (profile is not null && await ConfirmAsync("Delete saved game?", $"Delete {profile.Name}? Existing account destinations stay saved.", "Delete"))
+        if (profile is not null && await ConfirmAsync("Delete saved game?", $"Delete {profile.Name}? Account destinations stay saved.", "Delete"))
             await GuardAsync(async () => { await _api.SendAsync(HttpMethod.Delete, $"game-profiles/{profile.Id}"); await RefreshAsync(); });
     }
     private async Task EditGameAsync(GameProfile? profile)
@@ -235,9 +253,9 @@ public sealed partial class MainWindow
         var link = new TextBox { Header = "Private server link · optional", Text = profile?.Target.PrivateServerLink ?? "", MaxLength = 2048 };
         var error = new InfoBar { IsClosable = false, Severity = InfoBarSeverity.Error };
         var content = new StackPanel { Spacing = 12 };
-        content.Children.Add(new TextBlock { Text = "The game name and thumbnail are fetched from Roblox when saved. Choose a public game, a job ID, or a private server link.", TextWrapping = TextWrapping.Wrap });
+        content.Children.Add(new TextBlock { Text = "Name and thumbnail load on save. Job ID and private link are optional.", TextWrapping = TextWrapping.Wrap });
         foreach (var field in new UIElement[] { name, place, job, link, error }) content.Children.Add(field);
-        var dialog = new ContentDialog { XamlRoot = Root.XamlRoot, Title = profile is null ? "Add saved game" : "Edit saved game", Content = new ScrollViewer { Content = content, MaxHeight = 480 }, PrimaryButtonText = "Save game", CloseButtonText = "Cancel", RequestedTheme = Root.ActualTheme };
+        var dialog = new ContentDialog { XamlRoot = Root.XamlRoot, Title = profile is null ? "Add saved game" : "Edit saved game", Content = new ScrollViewer { Content = content, MaxHeight = 480 }, PrimaryButtonText = "Save", CloseButtonText = "Cancel", RequestedTheme = Root.ActualTheme };
         ApplyDialogTheme(dialog); _gameDialog = dialog;
         dialog.Closing += (_, args) => args.Cancel = _saving;
         dialog.PrimaryButtonClick += async (_, args) => {
@@ -256,7 +274,7 @@ public sealed partial class MainWindow
                         thumbnail = details.GetProperty("thumbnail_url").GetString();
                     }
                     await _api.SendAsync(HttpMethod.Post, "game-profiles", new GameProfile(profile?.Id ?? Guid.NewGuid().ToString(), name.Text.Trim(), gameName, thumbnail, target!));
-                    saved = true; FeedbackMessage("Game profile saved.", InfoBarSeverity.Success);
+                    saved = true; FeedbackMessage("Game saved.", InfoBarSeverity.Success);
                 });
                 args.Cancel = !saved; error.Message = Feedback.Message; error.IsOpen = !saved;
             }
@@ -296,6 +314,6 @@ public sealed partial class MainWindow
             column.Children.Add(new TextBlock { Text = start.AddHours(i * 3).ToLocalTime().ToString("HH:mm"), FontSize = 11, HorizontalAlignment = HorizontalAlignment.Center });
             Grid.SetColumn(column, i); TrendBars.Children.Add(column);
         }
-        TrendSummary.Text = $"{counts.Sum()} recorded events in the last 24 hours · newest interval at right · history retains up to 1,000 events";
+        TrendSummary.Text = $"{counts.Sum()} events · newest on right";
     }
 }

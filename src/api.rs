@@ -41,6 +41,7 @@ pub fn router(engine: Engine) -> Router {
         )
         .route("/v1/games/{place_id}", get(game_details))
         .route("/v1/settings/window", patch(window_settings))
+        .route("/v1/settings/game", patch(game_settings))
         .route("/v1/profiles", get(profiles).post(profile_save))
         .route("/v1/profiles/import", post(profile_import))
         .route("/v1/profiles/{id}", axum::routing::delete(profile_delete))
@@ -95,6 +96,20 @@ async fn game_details(
     Ok(Json(
         serde_json::json!({"name": name, "thumbnail_url": thumbnail_url}),
     ))
+}
+#[derive(Deserialize)]
+struct GameSettings {
+    server_selection: crate::model::ServerSelection,
+    join_type: crate::model::JoinType,
+}
+async fn game_settings(
+    State(engine): State<Engine>,
+    Json(settings): Json<GameSettings>,
+) -> Result<StatusCode, ApiError> {
+    engine
+        .set_game_settings(settings.server_selection, settings.join_type)
+        .map(|_| StatusCode::NO_CONTENT)
+        .map_err(error)
 }
 #[derive(Deserialize)]
 struct WindowSettings {
@@ -432,6 +447,77 @@ pub async fn serve_on(engine: Engine, listener: tokio::net::TcpListener) -> Resu
 mod tests {
     use super::*;
     use tower::ServiceExt;
+    #[tokio::test]
+    async fn game_join_settings_require_auth_validate_enums_and_persist() {
+        use crate::model::{JoinType, ServerSelection};
+        let path = std::env::temp_dir().join(format!("rbx-game-settings-{}", Uuid::new_v4()));
+        let engine = Engine::open(
+            crate::store::Store::new(path.clone()).unwrap(),
+            "fixture".into(),
+        )
+        .unwrap();
+        assert_eq!(engine.snapshot().server_selection, ServerSelection::Smart);
+        assert_eq!(engine.snapshot().join_type, JoinType::Random);
+        let app = router(engine.clone());
+        for (auth, body, expected) in [
+            (
+                false,
+                r#"{"server_selection":"lowest","join_type":"friend"}"#,
+                StatusCode::UNAUTHORIZED,
+            ),
+            (
+                true,
+                r#"{"server_selection":"invalid","join_type":"friend"}"#,
+                StatusCode::UNPROCESSABLE_ENTITY,
+            ),
+            (
+                true,
+                r#"{"server_selection":"highest","join_type":"invalid"}"#,
+                StatusCode::UNPROCESSABLE_ENTITY,
+            ),
+            (
+                true,
+                r#"{"server_selection":"lowest","join_type":"friend"}"#,
+                StatusCode::NO_CONTENT,
+            ),
+        ] {
+            let mut request = Request::builder()
+                .method("PATCH")
+                .uri("/v1/settings/game")
+                .header("content-type", "application/json");
+            if auth {
+                request = request.header("authorization", format!("Bearer {}", engine.token()));
+            }
+            let response = app
+                .clone()
+                .oneshot(request.body(axum::body::Body::from(body)).unwrap())
+                .await
+                .unwrap();
+            assert_eq!(response.status(), expected);
+            assert_eq!(
+                engine.snapshot().join_type,
+                if expected == StatusCode::NO_CONTENT {
+                    JoinType::Friend
+                } else {
+                    JoinType::Random
+                }
+            );
+        }
+        drop(app);
+        drop(engine);
+        let reopened = Engine::open(
+            crate::store::Store::new(path.clone()).unwrap(),
+            "fixture".into(),
+        )
+        .unwrap();
+        assert_eq!(
+            reopened.snapshot().server_selection,
+            ServerSelection::Lowest
+        );
+        assert_eq!(reopened.snapshot().join_type, JoinType::Friend);
+        drop(reopened);
+        std::fs::remove_dir_all(path).unwrap();
+    }
     #[tokio::test]
     async fn beta_update_preference_is_authenticated_and_persists() {
         let path = std::env::temp_dir().join(format!("rbx-update-settings-{}", Uuid::new_v4()));

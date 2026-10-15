@@ -12,7 +12,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             counts[match signal {
                 Signal::Connected => 0,
                 Signal::Disconnected => 1,
-                Signal::ConnectionFailed | Signal::SessionLost(_) => 2,
+                Signal::ConnectionFailed | Signal::JoinRequestFailed | Signal::SessionLost(_) => 2,
                 Signal::TargetUnavailable => 3,
                 Signal::PermissionDenied => 4,
             }] += 1;

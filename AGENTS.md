@@ -22,6 +22,17 @@ Use MAJOR.MINOR.PATCH for published stable releases. Apply these rules to all fu
 
 This is the project's release convention. It is inspired by Semantic Versioning; a large milestone alone is not necessarily a breaking API change under strict SemVer.
 
+## Documentation and changelog style
+
+- Keep README and docs concise. Use short sections, numbered steps for workflows, and bullets for independent facts.
+- Limit prose paragraphs to three short sentences (about 60 words). Split longer explanations; remove repetition and filler.
+- Preserve required commands, API contracts, prerequisites, security constraints, and known limitations when shortening.
+- Write changelog bullets as one short sentence per user-visible change; aim for 25 words or fewer. State the action and user impact.
+- Keep versions newest first, retain release dates/status, and use Added, Changed, or Fixed only when needed. Mark the upcoming release Unreleased/Upcoming.
+- Describe net changes since the latest published stable. Omit local iterations, commit narratives, implementation details, test logs, and fixes to unshipped features.
+- Keep CHANGELOG.md and desktop/CHANGELOG.txt aligned. Put detailed setup and validation in linked docs instead of repeating them in release history.
+- Shorten historical wording without dropping released changes, version entries, dates, or compatibility limits. Never modify published release artifacts.
+
 ## Roblox integration constraint
 
-Do not read or modify Roblox process memory, inject code, patch executables or client files, or use executors. Use authenticated Roblox requests, the installed launch protocol, Windows process metadata and exit handles, and existing log files. Never expose session cookies, tickets, or authenticated launch URLs in diagnostics.
+Read-only inspection of Roblox process memory is permitted. Do not write to or modify Roblox process memory, inject code, patch executables or client files, or use executors. Authenticated Roblox requests, the installed launch protocol, Windows process metadata and exit handles, and existing log files may also be used. Never expose session cookies, tickets, or authenticated launch URLs in diagnostics.
