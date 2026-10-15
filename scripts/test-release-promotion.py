@@ -1,6 +1,7 @@
 """Behavioral promotion tests; all GitHub effects stay in an in-memory fixture."""
 import base64
 import copy
+from contextlib import redirect_stdout
 import hashlib
 import io
 import json
@@ -11,6 +12,8 @@ import sys
 import unittest
 import warnings
 import zipfile
+from unittest.mock import patch
+import release_promotion
 from release_promotion import authorize, promote, promote_event
 
 
@@ -38,10 +41,12 @@ class GitHubFixture:
         self.branch = {"commit": {"sha": SHA}}
         checks = ["Branch flow", "Windows checks", "Linux checks and package (Ubuntu 24.04)",
                   "Linux checks (Ubuntu)", "Linux checks (Arch)"]
-        self.rules = [{"type": t} for t in ("pull_request", "non_fast_forward", "deletion")]
-        self.rules.append({"type": "required_status_checks", "parameters": {
-            "required_status_checks": [{"context": n} for n in checks]}})
-        self.tag_rules = dict(id=1, target="tag", enforcement="active",
+        self.rules = [{"type": t, "ruleset_id": 2} for t in ("pull_request", "non_fast_forward", "deletion")]
+        self.rules.append({"type": "required_status_checks", "ruleset_id": 2, "parameters": {
+            "strict_required_status_checks_policy": True,
+            "required_status_checks": [{"context": n, "integration_id": 15368} for n in checks]}})
+        self.branch_ruleset = dict(id=2, target="branch", enforcement="active", bypass_actors=[])
+        self.tag_rules = dict(id=1, target="tag", enforcement="active", bypass_actors=[],
                               conditions={"ref_name": {"include": ["refs/tags/v*", "refs/tags/beta-v*"], "exclude": []}},
                               rules=[{"type": "update"}, {"type": "deletion"}, {"type": "creation"}])
         self.linux_run = dict(self.run, id=13, path=".github/workflows/linux.yml")
@@ -69,6 +74,7 @@ class GitHubFixture:
                 for n, data in entries.items(): archive.writestr(n, data)
             self.archives[artifact_id] = buffer.getvalue()
             self.artifacts.append(dict(id=artifact_id, name=name + "-attempt-1", expired=False,
+                                       size_in_bytes=len(buffer.getvalue()),
                                        digest="sha256:" + hashlib.sha256(buffer.getvalue()).hexdigest(),
                                        workflow_run={"id": 12, "head_sha": SHA}))
 
@@ -134,6 +140,7 @@ class GitHubFixture:
         if path.startswith("/rules/branches/"): return self.rules
         if path.startswith("/rulesets?"): return [{k: self.tag_rules[k] for k in ("id", "target", "enforcement")}]
         if path == "/rulesets/1": return self.tag_rules
+        if path == "/rulesets/2": return self.branch_ruleset
         if path == "/actions/runs/12/attempts/1/jobs?per_page=100": return {"jobs": self.jobs, "total_count": len(self.jobs)}
         if path == "/actions/runs/13/attempts/1/jobs?per_page=100": return {"jobs": self.linux_jobs, "total_count": len(self.linux_jobs)}
         if path.startswith("/actions/workflows/linux.yml/runs?"): return {"workflow_runs": [self.linux_run], "total_count": 1}
@@ -153,6 +160,136 @@ class GitHubFixture:
 
 
 class PromotionTests(unittest.TestCase):
+    def test_zip_directory_metadata_is_bounded_before_parsing_entries(self):
+        github = GitHubFixture().with_intent()
+        with zipfile.ZipFile(io.BytesIO(github.archives[30])) as original:
+            entries = [(i, original.read(i)) for i in original.infolist()]
+        buffer = io.BytesIO()
+        with zipfile.ZipFile(buffer, "w") as archive:
+            for info, data in entries:
+                info.comment = b"x" * 20_000
+                archive.writestr(info, data)
+        github.archives[30] = buffer.getvalue()
+        github.artifacts[0].update(size_in_bytes=len(buffer.getvalue()),
+                                   digest="sha256:" + hashlib.sha256(buffer.getvalue()).hexdigest())
+        with self.assertRaisesRegex(ValueError, "ZIP directory"): promote(github, github.run)
+        self.assertEqual(github.writes, [])
+
+    def test_network_downloads_are_bounded_even_without_honest_content_length(self):
+        for raw in (True, False):
+            for header in (None, "1000", "1"):
+                with self.subTest(raw=raw, header=header):
+                    class Response(io.BytesIO):
+                        headers = {} if header is None else {"Content-Length": header}
+                        reads = []
+                        def read(self, size=-1):
+                            self.reads.append(size)
+                            return super().read(size)
+                    response = Response(b"x" * 1000)
+                    class Connection:
+                        def open(self, *args, **kwargs): return response
+                    with patch.object(release_promotion, "build_opener", return_value=Connection()), patch.multiple(
+                            release_promotion, MAX_ARCHIVE_BYTES=64, MAX_JSON_BYTES=64):
+                        api = release_promotion.github_api("synthetic-token")
+                        with self.assertRaisesRegex(ValueError, "size limit"):
+                            api("/actions/artifacts/30/zip", raw=raw)
+                    self.assertEqual(response.reads, [] if header == "1000" else [65])
+
+    def test_separate_beta_owner_creation_bypass_preserves_compatibility(self):
+        for fault in (None, "app", "wrong-role", "pr-only"):
+            with self.subTest(fault=fault):
+                github = GitHubFixture().with_beta()
+                github.tag_rules["conditions"]["ref_name"]["include"] = ["refs/tags/v*"]
+                beta_rules = copy.deepcopy(github.tag_rules)
+                beta_rules["id"] = 3
+                beta_rules["conditions"]["ref_name"]["include"] = ["refs/tags/beta-v*"]
+                actor = dict(actor_type="RepositoryRole", actor_id=5, bypass_mode="always")
+                if fault == "app": actor["actor_type"] = "Integration"
+                if fault == "wrong-role": actor["actor_id"] = 4
+                if fault == "pr-only": actor["bypass_mode"] = "pull_request"
+                beta_rules["bypass_actors"] = [actor]
+                def api(path, method="GET", body=None, **kwargs):
+                    if path.startswith("/rulesets?"): return [github.tag_rules, beta_rules]
+                    if path == "/rulesets/3": return beta_rules
+                    return github(path, method, body, **kwargs)
+                if fault:
+                    with self.assertRaisesRegex(ValueError, "tag bypass"): promote(api, github.run)
+                    self.assertEqual(github.writes, [])
+                else:
+                    self.assertEqual(promote(api, github.run), "published")
+                    self.assertTrue(github.release["prerelease"])
+                    self.assertEqual(github.release["make_latest"], "false")
+
+    def test_artifact_resource_limits_deny_before_any_release_mutation(self):
+        for fault in ("metadata", "download", "aggregate", "entry", "checksum"):
+            with self.subTest(fault=fault):
+                github = GitHubFixture().with_intent()
+                sizes = []
+                for data in github.archives.values():
+                    with zipfile.ZipFile(io.BytesIO(data)) as archive:
+                        sizes.extend(i.file_size for i in archive.infolist())
+                limits = dict(MAX_ARCHIVE_BYTES=10_000, MAX_EXPANDED_BYTES=10_000,
+                              MAX_ENTRY_BYTES=10_000, MAX_CHECKSUM_BYTES=10_000)
+                if fault == "metadata": github.artifacts[0]["size_in_bytes"] = 10_001
+                if fault == "download":
+                    limits["MAX_ARCHIVE_BYTES"] = len(github.archives[30]) - 1
+                    github.artifacts[0]["size_in_bytes"] = 1  # Metadata understates response size.
+                if fault == "aggregate": limits["MAX_EXPANDED_BYTES"] = sum(sizes) - 1
+                if fault == "entry": limits["MAX_ENTRY_BYTES"] = max(sizes) - 1
+                if fault == "checksum": limits["MAX_CHECKSUM_BYTES"] = 1
+                with patch.multiple(release_promotion, **limits):
+                    with self.assertRaisesRegex(ValueError, "limit"): promote(github, github.run)
+                self.assertEqual(github.writes, [])
+
+    def test_visible_tag_bypasses_cannot_weaken_immutable_tags(self):
+        for actor in ("Integration", "RepositoryRole", "User", "DeployKey"):
+            with self.subTest(actor=actor):
+                github = GitHubFixture().with_intent()
+                github.tag_rules["bypass_actors"] = [{"actor_type": actor, "actor_id": 5, "bypass_mode": "always"}]
+                with self.assertRaisesRegex(ValueError, "tag bypass"): promote(github, github.run)
+                self.assertEqual(github.writes, [])
+
+    def test_visible_branch_bypasses_and_inactive_rule_sources_deny(self):
+        for fault in ("admin", "app", "team", "user", "deploy-key", "inactive", "wrong-target", "missing-source"):
+            with self.subTest(fault=fault):
+                github = GitHubFixture().with_intent()
+                actors = {"admin": "RepositoryRole", "app": "Integration", "team": "Team",
+                          "user": "User", "deploy-key": "DeployKey"}
+                if fault in actors:
+                    github.branch_ruleset["bypass_actors"] = [{"actor_type": actors[fault], "actor_id": 5,
+                                                              "bypass_mode": "pull_request"}]
+                if fault == "inactive": github.branch_ruleset["enforcement"] = "evaluate"
+                if fault == "wrong-target": github.branch_ruleset["target"] = "tag"
+                if fault == "missing-source": github.rules[0].pop("ruleset_id")
+                with self.assertRaises(ValueError): promote(github, github.run)
+                self.assertEqual(github.writes, [])
+
+    def test_hidden_bypasses_report_the_separate_activation_verification_boundary(self):
+        github = GitHubFixture().with_intent()
+        github.branch_ruleset.pop("bypass_actors")
+        output = io.StringIO()
+        with redirect_stdout(output): self.assertEqual(promote(github, github.run), "published")
+        self.assertIn("Owner/admin activation verification required", output.getvalue())
+
+    def test_weak_required_check_rules_cannot_authorize_publication(self):
+        for branch in ("main", "dev"):
+            for fault in ("wrong-app", "any-app", "missing-app", "not-strict", "missing-strict", "truncated"):
+                with self.subTest(branch=branch, fault=fault):
+                    github = GitHubFixture().with_intent()
+                    weak = copy.deepcopy(github.rules)
+                    params = weak[-1]["parameters"]
+                    if fault == "wrong-app": params["required_status_checks"][0]["integration_id"] = 99
+                    if fault == "any-app": params["required_status_checks"][0]["integration_id"] = None
+                    if fault == "missing-app": params["required_status_checks"][0].pop("integration_id")
+                    if fault == "not-strict": params["strict_required_status_checks_policy"] = False
+                    if fault == "missing-strict": params.pop("strict_required_status_checks_policy")
+                    if fault == "truncated": weak *= 25
+                    def api(path, method="GET", body=None, **kwargs):
+                        if path.split("?")[0] == "/rules/branches/" + branch: return weak
+                        return github(path, method, body, **kwargs)
+                    with self.assertRaises(ValueError): promote(api, github.run)
+                    self.assertEqual(github.writes, [])
+
     def test_either_completed_workflow_can_reconcile_exact_source_once(self):
         for wakeup in ("ci", "linux"):
             with self.subTest(wakeup=wakeup):

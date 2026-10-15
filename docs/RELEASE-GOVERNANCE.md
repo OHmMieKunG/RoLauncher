@@ -58,7 +58,7 @@ It repeats controls and run checks before final promotion, including whether the
 | Run attempts | Re-read current attempt and job evidence before publishing; a changed attempt is not a mutation retry |
 | Artifact selection | Exact Windows/Linux names suffixed `-attempt-N`, source run ID/SHA and current attempt; no expired, duplicate or missing artifacts |
 | Archive integrity | GitHub API `sha256:` archive digest required and verified; missing digest fails closed |
-| ZIP handling | Fixed basenames only, no extraction-selected paths, duplicate entries, symlinks or entries above 2 GB |
+| ZIP handling | Fixed basenames; bounded directory and decompression; no paths, duplicates, symlinks, encryption, split ZIPs or ZIP64 |
 | Payload integrity | Existing Windows/Linux checksum validator requires exact payload sets and verified SHA256 values |
 | Version/channel | Intent, Cargo, lockfile, README and notes agree; source CI retains all existing changelog/version checks |
 | Stable ordering | A new stable version must exceed latest published stable; no application version is chosen by this change |
@@ -67,6 +67,18 @@ It repeats controls and run checks before final promotion, including whether the
 The publisher adds `release-promotion.json` with intent, source, channel, run/attempt, artifact IDs/archive digests and five final asset hashes.
 A hash of this receipt binds the draft body before uploads; the receipt becomes the sixth public release asset.
 The receipt uses authenticated GitHub evidence, not a new cryptographic signing key or signed-update scheme; PR03/PR04 remain separate.
+
+Each downloaded archive is capped at 256 MiB, including bounded HTTP reads when Content-Length is absent or false.
+Expanded data across both archives is capped at 512 MiB; individual entries are capped at 256 MiB and checksum files at 1 MiB.
+Extraction copies 1 MiB chunks to temporary files; final in-memory payloads remain bounded by the aggregate cap.
+
+Before ZIP parsing, the standard footer must declare the exact expected entry count and a central directory no larger than 64 KiB.
+Only stored/deflated entries are accepted; nested release payloads remain opaque and are never unpacked or executed.
+JSON responses are capped at 8 MiB; request timeouts and the existing 15-minute publishing-job timeout bound stalled work.
+
+These are application input budgets, not a guaranteed process-RSS ceiling or an OS sandbox.
+Current local Windows payloads total about 156 MiB; a prior Linux package is about 64 MiB, within these budgets.
+Larger packages or GitHub-generated ZIP64 archives fail closed and require a reviewed budget/format change before activation.
 
 ## Idempotency and failures
 
@@ -126,8 +138,24 @@ GitHub Free supports branch/tag rulesets for public repositories; availability m
 8. Enable GitHub release immutability for future releases after testing its draft/upload behavior; preserve existing releases. [GitHub immutability setup](https://docs.github.com/en/code-security/how-tos/secure-your-supply-chain/establish-provenance-and-integrity/prevent-release-changes).
 9. Cancel pre-transition privileged runs, complete isolated controls/permission/digest tests, then separately authorize `RELEASE_PROMOTION_ENABLED=true` as a repository Actions variable.
 
-The runtime gate reads active effective branch rules and tag-rule definitions, rather than treating this checklist as enforcement.
-It verifies required rule types/check names and beta tag-creation restriction; it does not independently prove every bypass assignment or collaborator permission.
+The runtime gate reads active effective branch rules, their source definitions and tag-rule definitions.
+All five required checks must specify GitHub Actions App ID `15368`; strict up-to-date checking must be explicitly true on each required-status rule.
+Missing/foreign integration IDs, missing/false strictness, truncated rule evidence and inactive/incorrect source rulesets deny promotion.
+
+Visible branch bypasses must be empty; visible stable-tag bypasses must be empty.
+Visible beta-tag bypasses permit only `RepositoryRole=5` (admin), `bypass_mode=always`; a separate owner/admin audit must confirm the owner is the only administrator.
+Use separate stable and beta tag rulesets, since the beta creation exception must not apply to stable tags.
+
+GitHub returns `bypass_actors` only to callers with write access to the ruleset; contents-write does not grant ruleset-write.
+An omitted field is explicitly reported as **unverified**, never interpreted as an empty list; the publisher cannot enforce a hidden list using its least-privilege token.
+Before enabling promotion, the owner/admin must separately inspect/export every applicable bypass list, collaborator/App/deploy-key permission and native immutability setting.
+
+Record ruleset IDs, scope, check integration IDs/strictness, bypass actors and the reviewer/date in the activation evidence.
+Reverify after protection, access, ownership or workflow changes; setting `RELEASE_PROMOTION_ENABLED=true` attests this separate verification has passed.
+The checklist/attestation is an administrative prerequisite, not an enforced GitHub security boundary or a substitute for actual rules.
+
+Rules and integration/strictness fields are readable with Metadata-read; no new publisher permissions are added.
+The GitHub Actions identity was checked against actual hosted check runs on the reviewed branch. [GitHub rules API fields and bypass visibility](https://docs.github.com/en/rest/repos/rules).
 Classic branch protection alone does not satisfy this implementation; configure the documented rulesets.
 
 GitHub's immutable-release settings endpoint requires Administration read permission, unavailable to the proposed minimal workflow token.
@@ -157,7 +185,7 @@ Do not delete, re-tag or replace historical releases as a rollback mechanism.
 
 | Check | Result on October 16, 2026 |
 |---|---|
-| `python scripts/test-release-promotion.py` | 22 behavioral tests passed, including denial matrices and injected interruption/race cases |
+| `python scripts/test-release-promotion.py` | 30 behavioral tests passed, including denial matrices, resource budgets and interruption/race cases |
 | `python scripts/test-publish-beta.py` | 6 existing compatibility/checksum tests passed |
 | `python scripts/test-versioning.py` | Development identity and stable preparation fixtures passed; repository version unchanged |
 | `python scripts/test-linux-update.py` | 3 archive/update tests passed on Windows; not a native Linux run |
@@ -202,6 +230,28 @@ Ordinary main merges previously published automatically from a job executing can
 Build workflows now remain read-only; a separate default-branch publisher requires a fresh owner-merged intent, passing exact-source Windows/Linux checks and verified artifacts before stable publication.
 Matching retries resume drafts without replacing bytes; consumed intents perform no writes, and beta stays a prerelease through the same guarded transition.
 
-Validation: 22 new behavioral tests, six existing beta tests, three archive/update tests, version fixtures, metadata checks, Python compilation and actionlint pass locally.
+Validation: 30 promotion behavioral tests, six existing beta tests, three archive/update tests, version fixtures, metadata checks, Python compilation and actionlint pass locally.
 Live protection and automatic publication remain disabled/pending separate approval; no application version, GPL terms, release artifact or application behavior changed.
 Review the settings/transition prerequisites and real-GitHub proof limitations above before authorizing activation.
+
+## Follow-up review disposition
+
+The comparison base is `dev` at `f61f9e06e4b5531b43b4af7a25a8ef1cec638af7`.
+The feature branch was rebased onto that tip; no merge into `dev` or `main` was performed.
+The unrelated Phase 0 audit was removed from the net PR diff and preserved outside the repository; the complete comparison is the 12 files listed above.
+
+Follow-up code changes are limited to `scripts/release_promotion.py`, its behavioral suite and this governance record.
+The original workflows, application version and application/licensing code were not changed by the follow-up.
+Red tests reproduced weak integration/strictness, bypass and resource acceptance before the corresponding guards were added.
+
+New coverage includes both branches, incorrect/missing App IDs, missing/false strictness, incomplete rule pages, visible bypasses and hidden-bypass reporting.
+Artifact coverage includes overstated metadata, understated download size, aggregate expansion across archives, entry/checksum limits, central-directory growth and bounded HTTP reads.
+Separate beta owner/admin creation bypass and rejected App/incorrect-role/PR-only exceptions are covered without creating a real tag.
+
+Hosted results and exact workflow execution SHAs must accompany the final review package; local tests do not prove hosted compatibility.
+For PR events GitHub builds a synthetic merge SHA; distinguish it from the PR head SHA and verify checkout's resolved HEAD in the logs.
+For push events checkout uses the run head SHA; trusted workflow-run publication still uses the default-branch event SHA, never candidate code.
+
+No release-intent record, live setting change, production credential or release is created by this follow-up.
+Live repository-variable access is an administrative permission boundary; do not infer a missing/false variable from an unauthenticated 404.
+The disabled-default CLI/workflow guards are tested; owner/admin verification of live activation state remains required before deployment.

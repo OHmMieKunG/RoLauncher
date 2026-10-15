@@ -6,6 +6,7 @@ import json
 import os
 from pathlib import Path
 import re
+import struct
 import tempfile
 import tomllib
 from urllib.error import HTTPError
@@ -21,6 +22,13 @@ BETA = ".github/workflows/beta-release.yml"
 STABLE_VERSION = r"(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)"
 CHECKS = {"Branch flow", "Windows checks", "Linux checks and package (Ubuntu 24.04)"}
 LINUX_CHECKS = {"Linux checks (Ubuntu)", "Linux checks (Arch)"}
+GITHUB_ACTIONS_ID = 15368  # Public GitHub Actions App, verified against hosted check runs.
+MAX_ARCHIVE_BYTES = 256 * 1024 * 1024
+MAX_EXPANDED_BYTES = 512 * 1024 * 1024  # Across both platform archives, not per entry.
+MAX_ENTRY_BYTES = 256 * 1024 * 1024
+MAX_CHECKSUM_BYTES = 1024 * 1024
+MAX_JSON_BYTES = 8 * 1024 * 1024
+COPY_BYTES = 1024 * 1024
 
 
 def require(condition, message):
@@ -107,22 +115,50 @@ def unchanged_run(call, run, expected):
 def protected_branches(call):
     require(call("/actions/workflows/release-promotion.yml")["state"] == "active", "Publisher workflow is disabled")
     for branch in ("main", "dev"):
-        rules = call("/rules/branches/" + branch)
+        rules = call("/rules/branches/" + branch + "?per_page=100")
+        require(len(rules) < 100, "Incomplete branch ruleset evidence")
         types = {r["type"] for r in rules}
         require({"pull_request", "non_fast_forward", "deletion", "required_status_checks"} <= types,
                 "Active branch rulesets required before promotion")
-        checks = {c["context"] for rule in rules if rule["type"] == "required_status_checks"
-                  for c in rule["parameters"]["required_status_checks"]}
+        checks = set()
+        for rule in rules:
+            if rule["type"] != "required_status_checks":
+                continue
+            params = rule["parameters"]
+            require(params.get("strict_required_status_checks_policy") is True,
+                    "Strict up-to-date required checks must be enforced")
+            for check in params["required_status_checks"]:
+                if check["context"] in CHECKS | LINUX_CHECKS:
+                    require(type(check.get("integration_id")) is int and check["integration_id"] == GITHUB_ACTIONS_ID,
+                            "Required check must originate from GitHub Actions")
+                    checks.add(check["context"])
         require(CHECKS | LINUX_CHECKS <= checks, "Required CI checks are not enforced by rulesets")
+        for rule_id in {r.get("ruleset_id") for r in rules}:
+            require(type(rule_id) is int and rule_id > 0, "Missing branch ruleset source")
+            source = call(f"/rulesets/{rule_id}")
+            require(source["id"] == rule_id and source["target"] == "branch" and source["enforcement"] == "active",
+                    "Inactive or incorrect branch ruleset source")
+            if "bypass_actors" in source:
+                require(source["bypass_actors"] == [], "Branch ruleset bypasses must be empty")
+            else:
+                # Metadata-read does not expose bypasses. Never infer an empty list from omission.
+                print("Owner/admin activation verification required: branch bypass actors are not visible.")
     rulesets = call("/rulesets?includes_parents=true&per_page=100")
     require(len(rulesets) < 100, "Incomplete tag ruleset evidence")
     tags = [call(f'/rulesets/{r["id"]}') for r in rulesets if r["target"] == "tag" and r["enforcement"] == "active"]
     for pattern in ("refs/tags/v*", "refs/tags/beta-v*"):
-        types = {rule["type"] for ruleset in tags
-                 if not ruleset["conditions"]["ref_name"]["exclude"]
-                 and (pattern in ruleset["conditions"]["ref_name"]["include"]
-                      or "~ALL" in ruleset["conditions"]["ref_name"]["include"])
-                 for rule in ruleset["rules"]}
+        matching = [r for r in tags if not r["conditions"]["ref_name"]["exclude"]
+                    and (pattern in r["conditions"]["ref_name"]["include"]
+                         or "~ALL" in r["conditions"]["ref_name"]["include"])]
+        types = {rule["type"] for ruleset in matching for rule in ruleset["rules"]}
+        for ruleset in matching:
+            if "bypass_actors" not in ruleset:
+                print("Owner/admin activation verification required: tag bypass actors are not visible.")
+                continue
+            for actor in ruleset["bypass_actors"]:
+                require(pattern == "refs/tags/beta-v*" and actor == {
+                    "actor_type": "RepositoryRole", "actor_id": 5, "bypass_mode": "always"},
+                    "Unexpected version tag bypass; beta permits only the sole owner/admin role")
         require({"update", "deletion"} <= types, "Active version tag rules must prevent updates and deletion")
         if pattern == "refs/tags/beta-v*":
             require("creation" in types, "Historical beta workflows require restricted tag creation")
@@ -137,6 +173,7 @@ def artifact_files(call, run, version, beta=False):
                "beta-linux" if beta else "release-linux-files": {prefix + s for s in ("-linux-x64.tar.gz", "-linux-SHA256SUMS.txt")}}
     layouts = {f'{name}-attempt-{run["run_attempt"]}': entries for name, entries in layouts.items()}
     provenance = []
+    expanded = 0
     with tempfile.TemporaryDirectory() as temp:
         for name, expected in layouts.items():
             matches = [a for a in result["artifacts"] if a["name"] == name]
@@ -144,16 +181,42 @@ def artifact_files(call, run, version, beta=False):
             artifact = matches[0]
             require(not artifact["expired"] and artifact["workflow_run"]["id"] == run["id"]
                     and artifact["workflow_run"]["head_sha"] == run["head_sha"], "Wrong artifact source or expired artifact")
+            require(type(artifact.get("size_in_bytes")) is int and 0 < artifact["size_in_bytes"] <= MAX_ARCHIVE_BYTES,
+                    "Artifact archive metadata exceeds size limit")
             archive_data = call(f'/actions/artifacts/{artifact["id"]}/zip', raw=True)
+            require(len(archive_data) <= MAX_ARCHIVE_BYTES, "Downloaded archive exceeds size limit")
             require(artifact.get("digest") == "sha256:" + hashlib.sha256(archive_data).hexdigest(), "Artifact archive digest mismatch")
+            # Bound the central directory before ZipFile allocates one object per entry.
+            end = archive_data.rfind(b"PK\x05\x06", max(0, len(archive_data) - 65_557))
+            require(end >= 0 and end + 22 <= len(archive_data), "Invalid ZIP directory footer")
+            disk, directory_disk, local_count, count, size, offset, comment = struct.unpack_from("<4H2IH", archive_data, end + 4)
+            require(disk == directory_disk == 0 and local_count == count == len(expected)
+                    and size <= 65_536 and offset + size == end and end + 22 + comment == len(archive_data)
+                    and archive_data[max(0, end - 20):end - 16] != b"PK\x06\x07",
+                    "ZIP directory limit exceeded or unsupported split/ZIP64 archive")
             with zipfile.ZipFile(io.BytesIO(archive_data)) as archive:
                 require(len(archive.infolist()) == len(expected) and set(archive.namelist()) == expected,
                         "Unexpected artifact archive entries")
-                for entry in archive.infolist():
-                    require(entry.file_size <= 2_000_000_000 and entry.external_attr >> 16 & 0o170000 != 0o120000,
-                            "Oversized or symlink artifact")
+                entries = archive.infolist()
+                require(expanded + sum(e.file_size for e in entries) <= MAX_EXPANDED_BYTES,
+                        "Aggregate decompression size limit exceeded")
+                for entry in entries:
+                    limit = min(MAX_ENTRY_BYTES, MAX_CHECKSUM_BYTES) if entry.filename.endswith("SHA256SUMS.txt") else MAX_ENTRY_BYTES
+                    require(entry.file_size <= limit, "Artifact entry size limit exceeded")
+                    require(entry.external_attr >> 16 & 0o170000 != 0o120000
+                            and not entry.flag_bits & 1 and entry.compress_type in (zipfile.ZIP_STORED, zipfile.ZIP_DEFLATED),
+                            "Symlink, encrypted or unsupported artifact")
                     # Fixed allowlist basenames only; never extract attacker-selected paths.
-                    (Path(temp) / entry.filename).write_bytes(archive.read(entry))
+                    written = 0
+                    with archive.open(entry) as source, (Path(temp) / entry.filename).open("wb") as target:
+                        while chunk := source.read(COPY_BYTES):
+                            written += len(chunk)
+                            expanded += len(chunk)
+                            require(written <= limit and expanded <= MAX_EXPANDED_BYTES,
+                                    "Actual decompression size limit exceeded")
+                            target.write(chunk)
+                    require(written == entry.file_size, "Artifact entry size mismatch")
+            del archive_data
             provenance.append({k: artifact[k] for k in ("id", "name", "digest")})
         files = {n: p if isinstance(p, bytes) else p.read_bytes()
                  for n, p in checked_files(Path(temp), version).items()}
@@ -279,7 +342,11 @@ def github_api(token):
             headers["Content-Type"] = "application/octet-stream" if binary is not None else "application/json"
         try:
             with opener.open(Request(url, data=data, method=method, headers=headers), timeout=120) as response:
-                result = response.read()
+                limit = MAX_ARCHIVE_BYTES if raw else MAX_JSON_BYTES
+                length = response.headers.get("Content-Length")
+                require(length is None or 0 <= int(length) <= limit, "GitHub response Content-Length exceeds size limit")
+                result = response.read(limit + 1)
+                require(len(result) <= limit, "GitHub response exceeds size limit")
                 return result if raw else json.loads(result) if result else None
         except HTTPError as error:
             if error.code == 404 and missing_ok:
