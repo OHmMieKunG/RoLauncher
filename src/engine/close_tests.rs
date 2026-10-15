@@ -111,6 +111,10 @@ fn recovery_and_force_escalation_remain_available_under_the_same_valid_intent() 
     let mut attempts = CloseAttempts::default();
     assert_eq!(f.tick(&f.account(), now, &mut attempts), vec![false]);
     assert_eq!(f.account().failures, 1);
+    assert!(
+        !f.account().disconnect_notified,
+        "Backoff must retain the existing notification normalization"
+    );
     assert_eq!(
         f.engine.activity(Some("1")).first().unwrap().status,
         Status::Backoff

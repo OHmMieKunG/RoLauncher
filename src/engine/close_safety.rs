@@ -130,10 +130,7 @@ impl Engine {
     // Same durable-before-visible ordering as Engine::transaction; callers already
     // hold the command mutex, including through the subsequent synchronous effect.
     fn commit_close_state(&self, state: &mut State, mut next: State) -> Result<(), String> {
-        let now = Utc::now();
-        for saved in &mut next.database.accounts {
-            saved.account.track_run(now);
-        }
+        normalize_accounts(&mut next);
         management::record_activity(state, &mut next);
         self.0.store.save(&next.database)?;
         for saved in &next.database.accounts {

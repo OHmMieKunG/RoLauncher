@@ -62,6 +62,27 @@ fn recovery_due(account: &Account, now: chrono::DateTime<Utc>) -> bool {
             .is_some_and(|t| now - t >= ChronoDuration::seconds(30))
 }
 
+fn normalize_accounts(next: &mut State) {
+    let now = Utc::now();
+    for saved in &mut next.database.accounts {
+        let a = &mut saved.account;
+        a.track_run(now);
+        if a.status == Status::Reconnecting && a.desired_running {
+            let known_error = a.last_error.as_deref().is_some_and(|e| {
+                e.starts_with("Session lost (code") || e.starts_with("Connection failed:")
+            });
+            if known_error
+                || a.disconnected_since
+                    .is_some_and(|t| Utc::now() - t >= ChronoDuration::seconds(30))
+            {
+                a.disconnect_notified = true;
+            }
+        } else {
+            a.disconnect_notified = false;
+        }
+    }
+}
+
 fn retired_blocks_launch(database: &Database, id: &str) -> bool {
     database
         .retired_launches
@@ -227,24 +248,7 @@ impl Engine {
         let mut current = self.0.state.lock().unwrap();
         let mut next = current.clone();
         let result = edit(&mut next)?;
-        let now = Utc::now();
-        for saved in &mut next.database.accounts {
-            let a = &mut saved.account;
-            a.track_run(now);
-            if a.status == Status::Reconnecting && a.desired_running {
-                let known_error = a.last_error.as_deref().is_some_and(|e| {
-                    e.starts_with("Session lost (code") || e.starts_with("Connection failed:")
-                });
-                if known_error
-                    || a.disconnected_since
-                        .is_some_and(|t| Utc::now() - t >= ChronoDuration::seconds(30))
-                {
-                    a.disconnect_notified = true;
-                }
-            } else {
-                a.disconnect_notified = false;
-            }
-        }
+        normalize_accounts(&mut next);
         management::record_activity(&current, &mut next);
         self.0.store.save(&next.database)?;
         while next.operations.len() > 1000 {
