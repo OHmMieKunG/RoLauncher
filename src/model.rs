@@ -198,6 +198,9 @@ impl CloseReason {
 /// Intent is durable; permission is re-evaluated at every effect, never cached here.
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
 pub struct CloseIntent {
+    /// A new classification starts a new graceful/force episode, even within one operation.
+    #[serde(default)]
+    pub id: Uuid,
     pub reason: CloseReason,
     pub generation: Uuid,
     pub operation_id: Option<Uuid>,

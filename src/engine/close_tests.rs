@@ -858,6 +858,44 @@ fn explicit_stop_closes_only_the_verified_owned_process() {
 }
 
 #[test]
+fn a_new_recovery_episode_cannot_reuse_the_previous_episodes_force_timer() {
+    for target_replacement in [false, true] {
+        let f = Fixture::new();
+        f.engine
+            .patch(
+                "1",
+                AccountPatch {
+                    fallback_policy: Some(FallbackPolicy::AllowPublic),
+                    ..Default::default()
+                },
+            )
+            .unwrap();
+        let now = Instant::now();
+        let mut attempts = CloseAttempts::default();
+        if target_replacement {
+            let a = f.account();
+            f.engine
+                .signal("1", a.generation, Signal::TargetUnavailable);
+        } else {
+            f.recovery();
+        }
+        assert_eq!(f.tick(&f.account(), now, &mut attempts), vec![false]);
+        let a = f.account();
+        f.engine.signal("1", a.generation, Signal::Connected);
+        // Both events occur before another monitor tick can discard the old timer.
+        if target_replacement {
+            f.engine
+                .signal("1", a.generation, Signal::TargetUnavailable);
+        } else {
+            f.recovery();
+        }
+        assert_eq!(
+            f.tick(&f.account(), now + Duration::from_secs(40), &mut attempts),
+            vec![false]
+        );
+    }
+}
+#[test]
 fn confirmed_live_exit_preserves_stop_authority_for_a_separate_retired_client() {
     let f = Fixture::new();
     let original = f.account();
@@ -915,4 +953,47 @@ fn confirmed_live_exit_preserves_stop_authority_for_a_separate_retired_client() 
     f.engine
         .owned_exit_observed(&original, original.process.as_ref().unwrap(), false);
     assert!(!f.account().desired_running);
+}
+
+#[test]
+fn legacy_intent_without_episode_identity_requires_and_accepts_fresh_stop() {
+    let f = Fixture::new();
+    f.engine.command("1", "stop").unwrap();
+    let store = Store::new(f.path.clone()).unwrap();
+    let mut legacy = serde_json::to_value(store.load().unwrap()).unwrap();
+    legacy["accounts"][0]["account"]["close_intent"]
+        .as_object_mut()
+        .unwrap()
+        .remove("id");
+    store
+        .save(&serde_json::from_value(legacy).unwrap())
+        .unwrap();
+    let engine = Engine::open(store, "legacy".into()).unwrap();
+    let a = engine.snapshot().accounts.remove(0);
+    let players = f.players();
+    let _ = engine.close_owned(
+        &a,
+        Instant::now(),
+        &mut CloseAttempts::default(),
+        || Ok(players),
+        |_, _| panic!("legacy ID-less intent must not close"),
+    );
+    engine.command("1", "stop").unwrap();
+    let a = engine.snapshot().accounts.remove(0);
+    let players = f.players();
+    let mut closed = false;
+    engine
+        .close_owned(
+            &a,
+            Instant::now(),
+            &mut CloseAttempts::default(),
+            || Ok(players),
+            |_, force| {
+                assert!(!force);
+                closed = true;
+                Ok(())
+            },
+        )
+        .unwrap();
+    assert!(closed);
 }

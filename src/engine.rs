@@ -542,7 +542,7 @@ impl Engine {
         self.transaction(|s| {
             if bot.is_some_and(|b| { let mut saved = s.database.discord.bot.clone(); saved.registration = None; !b.enabled || *b != saved || self.bot_generation().is_multiple_of(2) }) || self.is_shutdown() { return Err("Command connection changed".into()); }
             let existing = account_mut(s,id)?.clone();
-            if (action == "start" && existing.desired_running && existing.status != Status::NeedsAttention) || (action == "stop" && !existing.desired_running && existing.close_intent.as_ref().is_some_and(|i| i.reason == CloseReason::UserStop && !i.denied) && !s.database.retired_launches.iter().any(|r| r.account_id == id && r.process.is_some() && r.close_intent != existing.close_intent)) {
+            if (action == "start" && existing.desired_running && existing.status != Status::NeedsAttention) || (action == "stop" && !existing.desired_running && existing.close_intent.as_ref().is_some_and(|i| i.reason == CloseReason::UserStop && !i.denied && !i.id.is_nil()) && !s.database.retired_launches.iter().any(|r| r.account_id == id && r.process.is_some() && r.close_intent != existing.close_intent)) {
                 if let Some(op) = existing.operation_id.and_then(|id|s.operations.get(&id)).cloned() { return Ok(op); }
                 let op = Operation { id:Uuid::new_v4(), account_id:id.into(), state:"completed".into(), error:None }; s.operations.insert(op.id,op.clone()); return Ok(op);
             }
@@ -553,7 +553,7 @@ impl Engine {
             if let Some(previous) = existing.operation_id.and_then(|id|s.operations.get_mut(&id)) && previous.state == "queued" { previous.state = "cancelled".into(); }
             let op = Operation { id:Uuid::new_v4(),account_id:id.into(),state:if action=="stop" && existing.process.is_none(){"completed"}else{"queued"}.into(),error:None };
             let generation = Uuid::new_v4();
-            let close_intent = CloseIntent { reason: match action {
+            let close_intent = CloseIntent { id: Uuid::new_v4(), reason: match action {
                 "stop" => CloseReason::UserStop,
                 "restart" => CloseReason::ManualRestart,
                 _ => CloseReason::ManualStartReplacement,
@@ -1216,6 +1216,7 @@ fn apply_failure(a: &mut Account, error: &Failure) {
         a.next_retry = Some(Utc::now() + ChronoDuration::seconds(delay as i64));
         if error.kind == FailureKind::TargetUnavailable && a.process.is_some() {
             a.close_intent = Some(CloseIntent {
+                id: Uuid::new_v4(),
                 reason: CloseReason::TargetReplacement,
                 generation: a.generation,
                 operation_id: a.operation_id,

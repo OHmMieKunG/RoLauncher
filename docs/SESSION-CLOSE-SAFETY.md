@@ -38,7 +38,7 @@ UI/login `WM_CLOSE` handlers close RoLauncher windows, not managed Roblox client
 | `TargetReplacement` | TargetUnavailable schedules an eligible fallback/retry. | Current fallback/recovery settings, destination, retry budget, connectivity and OS coordination; scheduled replacement still valid. |
 | `ObsoleteLaunch` | Start supersedes an unresolved tracker from an attention state. | Observation only. Obsolescence never authorizes closing a late client. |
 
-`CloseIntent` binds reason, account generation and operation UUID, with a sticky denial flag.
+`CloseIntent` binds a fresh intent UUID, reason, account generation and operation UUID, with a sticky denial flag.
 An absent or incomplete intent never authorizes a close merely because status is Queued, desired state is false, or a timer exists.
 PID, creation time, tracker and original launch generation remain in `ProcessIdentity`.
 
@@ -61,6 +61,7 @@ OS coordination remains a separate input; no license policy or licensing network
 - Discovery/disk latency before submission does not count toward the five-second grace interval.
 - Every force attempt repeats current intent, generation, operation, unique ownership and native identity checks.
 - A new Stop or Restart starts a fresh graceful phase even when it targets the same process.
+- A new recovery episode has a fresh intent UUID, so reconnect/recovery events between monitor ticks cannot reuse an earlier force timer.
 - Changed recovery settings, recovered connection, lost coordination, ambiguous ownership or native errors stop escalation.
 - Denial retains client/process evidence, reports an attention state and does not consume another recovery retry.
 - Failed close attempts are latched in memory even if persisting their denial fails; no tick can silently retry with stronger force.
@@ -80,6 +81,7 @@ The late process is observed and preserved; an explicit Stop can authorize the f
 A frozen record is never rebound to a reused PID, a changed creation time or a different tracker match.
 
 Legacy accounts and tombstones deserialize missing intent as `None`; missing retired process binding also defaults to `None`.
+An incomplete legacy intent without its episode UUID defaults to nil and grants no close authority; explicit Stop creates fresh evidence.
 No destructive migration infers Stop from historical desired state or status strings.
 Unique legacy matches enter an actionable attention state, retaining ownership evidence until explicit Stop or confirmed exit.
 

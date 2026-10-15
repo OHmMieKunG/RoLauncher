@@ -101,6 +101,7 @@ fn eligible(
     launch_allowed: bool,
 ) -> bool {
     if intent.denied
+        || intent.id.is_nil()
         || intent.operation_id.is_none()
         || intent.generation != a.generation
         || intent.operation_id != a.operation_id
@@ -235,6 +236,7 @@ impl Engine {
         }
         if a.close_intent.is_none() && recovery_due(a, Utc::now()) {
             a.close_intent = Some(CloseIntent {
+                id: Uuid::new_v4(),
                 reason: CloseReason::AutomaticRecovery,
                 generation: a.generation,
                 operation_id: a.operation_id,
