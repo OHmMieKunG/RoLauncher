@@ -135,7 +135,7 @@ impl Engine {
         clean: bool,
     ) {
         let _ = self.update(&account.id, account.generation, |a| {
-            if a.process.as_ref() != Some(&identity) {
+            if a.process.as_ref() != Some(identity) {
                 return;
             }
             a.process = None;
