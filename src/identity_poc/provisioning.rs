@@ -174,6 +174,10 @@ pub fn read_registration(path: &Path) -> Result<(serde_json::Value, serde_json::
         .take(32769)
         .read_to_end(&mut bytes)
         .map_err(|_| "registration unreadable; recovery required")?;
+    decode_registration(&bytes)
+}
+
+pub fn decode_registration(bytes: &[u8]) -> Result<(serde_json::Value, serde_json::Value), String> {
     if bytes.len() > 32768 || !bytes.ends_with(b"\n") {
         return Err("registration torn or oversized; preserve all recovery evidence".into());
     }

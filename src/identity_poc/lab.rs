@@ -9,7 +9,7 @@ use std::{
 };
 use windows_sys::Win32::Storage::FileSystem::*;
 
-#[derive(Clone, Serialize, Deserialize)]
+#[derive(Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 struct Config {
     lab_id: uuid::Uuid,
@@ -524,6 +524,8 @@ fn machine() -> Result<(Config, PublicKey, [u8; 32]), String> {
         serde_json::from_value(evidence).map_err(|_| "missing machine public evidence")?;
     recovery::valid_name(&key.name)?;
     if key.name != reservation.planned.name
+        || key.provider != reservation.planned.provider
+        || key.scope != reservation.planned.scope
         || key.provider != reservation.config.provider
         || key.scope != Scope::Machine
         || key.blob.is_empty()
@@ -572,7 +574,19 @@ fn enroll() -> Result<(), String> {
 }
 
 fn user_info(config: &Config, binding: [u8; 32]) -> Result<PublicKey, String> {
-    let (reservation, evidence) = policy::read_registration(&user_path(config)?)?;
+    decode_user_journal(
+        config,
+        binding,
+        policy::read_registration(&user_path(config)?)?,
+    )
+}
+
+fn decode_user_journal(
+    config: &Config,
+    binding: [u8; 32],
+    journal: (serde_json::Value, serde_json::Value),
+) -> Result<PublicKey, String> {
+    let (reservation, evidence) = journal;
     if reservation.get("binding") != Some(&serde_json::json!(binding)) {
         return Err("installation registration changed".into());
     }
@@ -582,9 +596,11 @@ fn user_info(config: &Config, binding: [u8; 32]) -> Result<PublicKey, String> {
         || info.provider != config.provider
         || reservation.get("user_name") != Some(&serde_json::json!(info.name))
         || info.blob.is_empty()
+        || info.blob.len() > 4096
     {
         return Err("user registration identity mismatch".into());
     }
+    recovery::valid_name(&info.name)?;
     Ok(info)
 }
 
@@ -636,6 +652,28 @@ fn check() -> Result<(), String> {
     Ok(())
 }
 
+fn validate_recovery_registration(
+    config: &Config,
+    record: &recovery::Snapshot,
+    protected_registration: Result<(Config, PublicKey, [u8; 32]), String>,
+) -> Result<(), String> {
+    // machine() independently validates the fixed registration's owner/DACL and planned key.
+    // Even prior disposal must be attributed to this exact lab before reporting success.
+    let (registered_config, registered_key, _) = protected_registration?;
+    if config != &registered_config
+        || record.key != registered_key
+        || record.key.scope != Scope::Machine
+        || record.key.provider != config.provider
+        || record.key.blob.is_empty()
+    {
+        return Err(
+            "exact lab registration relationship unavailable; retain receipt for independent recovery"
+                .into(),
+        );
+    }
+    Ok(())
+}
+
 fn recover(config_path: &Path, receipt_path: &Path) -> Result<(), String> {
     let identity = effective_identity()?;
     identity.accept(ContextPurpose::Diagnostic)?;
@@ -648,6 +686,7 @@ fn recover(config_path: &Path, receipt_path: &Path) -> Result<(), String> {
         return Err("elevated provisioning principal P required for machine recovery".into());
     }
     let receipt = recovery::Receipt::open(receipt_path, &identity)?;
+    validate_recovery_registration(&config, &receipt.record, machine())?;
     if matches!(
         receipt.record.cleanup,
         Some(
@@ -658,20 +697,96 @@ fn recover(config_path: &Path, receipt_path: &Path) -> Result<(), String> {
     ) {
         return Ok(());
     }
-    if receipt.record.key.scope != Scope::Machine
-        || receipt.record.key.provider != config.provider
-        || receipt.record.key.blob.is_empty()
-    {
-        return Err(
-            "exact machine public evidence unavailable; retain receipt for independent recovery"
-                .into(),
-        );
-    }
     let mut key = Key::open(&receipt.record.key)?;
     check_machine_acl(&key, &config)?;
     key.recovery = Some(receipt);
     key.delete()?;
     Ok(())
+}
+
+fn validate_observed_user(
+    config: &Config,
+    binding: [u8; 32],
+    public_journal: (serde_json::Value, serde_json::Value),
+    protected_reference: Result<(serde_json::Value, serde_json::Value), String>,
+) -> Result<PublicKey, String> {
+    let user = decode_user_journal(config, binding, public_journal)?;
+    let original = decode_user_journal(config, binding, protected_reference?)?;
+    if user != original {
+        return Err("public copy is not the independently pinned original user key".into());
+    }
+    Ok(user)
+}
+
+fn trusted_user_reference(
+    config: &Config,
+) -> Result<(serde_json::Value, serde_json::Value), String> {
+    let directory = machine_directory()?;
+    let path = directory.join("original-user.jsonl");
+    check_shared_path(&directory, config)?;
+    check_shared_path(&path, config)?;
+    policy::read_registration(&path)
+}
+
+fn validate_reference_copy(
+    config: &Config,
+    binding: [u8; 32],
+    bytes: &[u8],
+    independently_expected_digest: [u8; 32],
+) -> Result<(), String> {
+    if hash(bytes)? != independently_expected_digest {
+        return Err("original A journal comparison failed; no trusted reference created".into());
+    }
+    decode_user_journal(config, binding, policy::decode_registration(bytes)?)?;
+    Ok(())
+}
+
+/// P must obtain the expected digest from A's verified original journal through a separate
+/// trusted local handoff, never by hashing B's supplied copy. No references enter reports.
+fn pin_user(public_copy: &Path) -> Result<(), String> {
+    let identity = effective_identity()?;
+    identity.accept(ContextPurpose::Diagnostic)?;
+    let (config, _, binding) = machine()?;
+    if !identity.elevated
+        || identity.sid != config.provisioner_sid
+        || identity.logon != LogonContext::Interactive
+        || identity.session_zero
+    {
+        return Err(
+            "interactive elevated principal P required to pin A's original user reference".into(),
+        );
+    }
+    eprintln!(
+        "Enter original A journal SHA256 from the separate trusted local comparison (64 hex characters; never included in reports):"
+    );
+    let mut comparison = String::new();
+    std::io::stdin()
+        .read_line(&mut comparison)
+        .map_err(|_| "independent local comparison unavailable")?;
+    let comparison = comparison.trim();
+    if comparison.len() != 64 || !comparison.bytes().all(|byte| byte.is_ascii_hexdigit()) {
+        return Err("invalid independent local comparison".into());
+    }
+    let mut expected = [0u8; 32];
+    for (index, value) in expected.iter_mut().enumerate() {
+        *value = u8::from_str_radix(&comparison[index * 2..index * 2 + 2], 16)
+            .map_err(|_| "invalid local digest")?;
+    }
+    let mut bytes = Vec::new();
+    File::open(public_copy)
+        .map_err(|_| "original journal copy unavailable")?
+        .take(32769)
+        .read_to_end(&mut bytes)
+        .map_err(|_| "original journal copy unreadable")?;
+    validate_reference_copy(&config, binding, &bytes, expected)?;
+    let path = machine_directory()?.join("original-user.jsonl");
+    let mut file = protected_new(&path, &config.shared_descriptor(), false)?
+        .ok_or("reference handle unavailable")?;
+    use std::io::Write;
+    file.write_all(&bytes)
+        .and_then(|_| file.sync_all())
+        .map_err(|_| "partial original user reference retained; observations unverified")?;
+    check_shared_path(&path, &config)
 }
 
 fn observe(public_user_state: &Path) -> Result<serde_json::Value, String> {
@@ -682,17 +797,17 @@ fn observe(public_user_state: &Path) -> Result<serde_json::Value, String> {
     if !distinct && identity.sid != config.authorized_sid {
         return Err("designated A or B token required".into());
     }
-    // A explicitly supplies a public copy for B; it is never trusted as authorization state.
-    let (reservation, evidence) = policy::read_registration(public_user_state)?;
-    if reservation.get("binding") != Some(&serde_json::json!(binding)) {
-        return Err("public copy binding mismatch".into());
-    }
-    let user: PublicKey = serde_json::from_value(evidence).map_err(|_| "invalid public copy")?;
-    if user.scope != Scope::User || user.provider != config.provider {
-        return Err("public copy scope/provider mismatch".into());
-    }
+    let user = policy::read_registration(public_user_state)
+        .and_then(|copy| {
+            validate_observed_user(&config, binding, copy, trusted_user_reference(&config))
+        })
+        .ok();
     let mut observations = Vec::new();
-    for expected in [&info, &user] {
+    let mut targets = vec![&info];
+    if let Some(user) = &user {
+        targets.push(user);
+    }
+    for expected in targets {
         let opened = Key::open_raw(expected);
         let open = policy::uploadable_observation(
             opened.as_ref().map(|_| ()).map_err(Clone::clone),
@@ -723,9 +838,14 @@ fn observe(public_user_state: &Path) -> Result<serde_json::Value, String> {
         };
         observations.push(serde_json::json!({"scope":expected.scope,"open":open,"fixed_challenge_sign_and_verify":sign,"acl_accepted":acl}));
     }
+    if user.is_none() {
+        observations.push(serde_json::json!({"scope":"user", "original_user_evidence":"unverified",
+            "native_private_use":"not_attempted", "reason":"original_reference_missing_invalid_or_mismatched"}));
+    }
     Ok(
         serde_json::json!({"context": context()?, "standard_account": ordinary(&identity).is_ok(),
         "designated_user_b_live_token": distinct, "native_access":observations,
+        "original_user_evidence":if user.is_some() {"matched_protected_independent_reference"} else {"unverified"},
         "enrollment_accepted":false, "customer_authenticated":false, "isolation_proven":false}),
     )
 }
@@ -852,6 +972,11 @@ pub(super) fn run(args: &[String]) -> Result<(), String> {
             recover(Path::new(config), Path::new(receipt))?;
             Ok(policy::uploadable_observation(Ok(()), false, 0))
         }
+        [command, copy, _flag] if command == "lab-pin-user" => {
+            human_gate(args)?;
+            pin_user(Path::new(copy))?;
+            Ok(policy::uploadable_observation(Ok(()), false, 0))
+        }
         [command, receipt, _flag] if command == "lab-recover-user" => {
             human_gate(args)?;
             ordinary(&effective_identity()?)?;
@@ -887,6 +1012,7 @@ pub(super) fn run(args: &[String]) -> Result<(), String> {
         Some("lab-rights") => "sacrificial_management_operations",
         Some("lab-recover-machine") => "exact_machine_recovery",
         Some("lab-recover-user") => "exact_user_recovery",
+        Some("lab-pin-user") => "trusted_original_user_reference",
         _ => "unsupported",
     }
     .into();
@@ -896,6 +1022,11 @@ pub(super) fn run(args: &[String]) -> Result<(), String> {
             .is_some_and(|command| command == "lab-provision")
     {
         report["machine_scope_policy_and_acl_accepted"] = true.into();
+    }
+    if args.first().is_some_and(|command| command == "lab-observe")
+        && report.get("original_user_evidence").is_none()
+    {
+        report["original_user_evidence"] = "unverified".into();
     }
     match recovery::summary() {
         Ok(accounting) => {
@@ -920,6 +1051,233 @@ pub(super) fn run(args: &[String]) -> Result<(), String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::io::Write;
+
+    fn review_config() -> Config {
+        Config {
+            lab_id: uuid::Uuid::from_u128(0x12345678123442348234123456789abc),
+            provisioner_sid: "S-1-5-21-1-2-3-1001".into(),
+            authorized_sid: "S-1-5-21-1-2-3-1002".into(),
+            unauthorized_sid: "S-1-5-21-1-2-3-1003".into(),
+            provider: Provider::Software,
+        }
+    }
+
+    fn review_key() -> PublicKey {
+        PublicKey {
+            name: "RoLauncher.IdentityPoC.12345678-1234-4234-8234-123456789abc".into(),
+            provider: Provider::Software,
+            scope: Scope::Machine,
+            blob: vec![1, 2, 3],
+        }
+    }
+
+    fn review_receipt(key: PublicKey) -> recovery::Snapshot {
+        recovery::Snapshot {
+            schema_version: 1,
+            key,
+            owner_sid_reference: [1; 32],
+            phase: recovery::Phase::Finalized,
+            cleanup: Some(recovery::CleanupOutcome::Incomplete),
+            native_status: Some(0x80090016),
+        }
+    }
+
+    #[test]
+    fn review_recovery_rejects_cross_lab_receipt_with_identical_principals_and_provider() {
+        let config = review_config();
+        let original = review_key();
+        let mut other = original.clone();
+        other.name = "RoLauncher.IdentityPoC.87654321-4321-4321-8321-cba987654321".into();
+        other.blob = vec![4, 5, 6];
+        assert!(
+            validate_recovery_registration(
+                &config,
+                &review_receipt(other),
+                Ok((config.clone(), original, [1; 32]))
+            )
+            .is_err()
+        );
+    }
+
+    #[test]
+    fn review_recovery_accepts_only_the_exact_registered_receipt_including_prior_disposal() {
+        let config = review_config();
+        let key = review_key();
+        for cleanup in [
+            Some(recovery::CleanupOutcome::Incomplete),
+            Some(recovery::CleanupOutcome::Succeeded),
+        ] {
+            let mut record = review_receipt(key.clone());
+            record.cleanup = cleanup;
+            validate_recovery_registration(
+                &config,
+                &record,
+                Ok((config.clone(), key.clone(), [1; 32])),
+            )
+            .unwrap();
+            let mut other = config.clone();
+            other.lab_id = uuid::Uuid::from_u128(0x87654321432143218321cba987654321);
+            assert!(
+                validate_recovery_registration(
+                    &other,
+                    &record,
+                    Ok((config.clone(), key.clone(), [1; 32]))
+                )
+                .is_err()
+            );
+        }
+    }
+
+    #[test]
+    fn review_recovery_rejects_other_lab_uuid_even_with_the_same_registered_key() {
+        let config = review_config();
+        let key = review_key();
+        let mut other = config.clone();
+        other.lab_id = uuid::Uuid::from_u128(0x87654321432143218321cba987654321);
+        assert!(
+            validate_recovery_registration(
+                &other,
+                &review_receipt(key.clone()),
+                Ok((config, key, [1; 32]))
+            )
+            .is_err()
+        );
+    }
+
+    #[test]
+    fn review_recovery_rejects_partial_and_torn_registration_without_changing_receipt() {
+        let config = review_config();
+        let record = review_receipt(review_key());
+        let before = serde_json::to_vec(&record).unwrap();
+        let directory =
+            std::env::temp_dir().join(format!("rolauncher-review-{}", uuid::Uuid::new_v4()));
+        std::fs::create_dir(&directory).unwrap();
+        let path = directory.join("synthetic-registration.jsonl");
+        let reservation =
+            Registration::reserve(&path, serde_json::json!({"synthetic":true})).unwrap();
+        drop(reservation);
+        for torn in [false, true] {
+            if torn {
+                std::fs::OpenOptions::new()
+                    .append(true)
+                    .open(&path)
+                    .unwrap()
+                    .write_all(b"{torn")
+                    .unwrap();
+            }
+            let registration =
+                policy::read_registration(&path).map(|_| (config.clone(), review_key(), [1; 32]));
+            assert!(validate_recovery_registration(&config, &record, registration).is_err());
+            assert_eq!(serde_json::to_vec(&record).unwrap(), before);
+        }
+        std::fs::remove_dir_all(directory).unwrap();
+    }
+
+    fn review_user_journal() -> (serde_json::Value, serde_json::Value) {
+        let mut user = review_key();
+        user.scope = Scope::User;
+        (
+            serde_json::json!({"binding":vec![1;32],"user_name":user.name}),
+            serde_json::to_value(user).unwrap(),
+        )
+    }
+
+    #[test]
+    fn review_observation_rejects_substituted_key_with_self_consistent_name_and_machine_binding() {
+        let original = review_user_journal();
+        let mut substituted = original.clone();
+        substituted.0["user_name"] =
+            "RoLauncher.IdentityPoC.87654321-4321-4321-8321-cba987654321".into();
+        substituted.1["name"] = substituted.0["user_name"].clone();
+        substituted.1["blob"] = serde_json::json!([9, 9, 9]);
+        assert!(
+            validate_observed_user(&review_config(), [1; 32], substituted, Ok(original)).is_err()
+        );
+    }
+
+    #[test]
+    fn review_observation_rejects_inconsistent_user_name_and_metadata() {
+        let original = review_user_journal();
+        let mut inconsistent = original.clone();
+        inconsistent.0["user_name"] =
+            "RoLauncher.IdentityPoC.87654321-4321-4321-8321-cba987654321".into();
+        assert!(
+            validate_observed_user(&review_config(), [1; 32], inconsistent, Ok(original)).is_err()
+        );
+    }
+
+    #[test]
+    fn review_observation_requires_separate_reference_and_accepts_authentic_copy() {
+        let original = review_user_journal();
+        validate_observed_user(
+            &review_config(),
+            [1; 32],
+            original.clone(),
+            Ok(original.clone()),
+        )
+        .unwrap();
+        assert!(
+            validate_observed_user(
+                &review_config(),
+                [1; 32],
+                original,
+                Err("trusted original unavailable".into())
+            )
+            .is_err()
+        );
+    }
+
+    #[test]
+    fn review_recovery_rejects_individual_name_provider_scope_and_public_key_substitution() {
+        let config = review_config();
+        let original = review_key();
+        for field in 0..4 {
+            let mut changed = original.clone();
+            match field {
+                0 => {
+                    changed.name =
+                        "RoLauncher.IdentityPoC.87654321-4321-4321-8321-cba987654321".into()
+                }
+                1 => changed.provider = Provider::Tpm,
+                2 => changed.scope = Scope::User,
+                _ => changed.blob = vec![9, 9, 9],
+            }
+            assert!(
+                validate_recovery_registration(
+                    &config,
+                    &review_receipt(changed),
+                    Ok((config.clone(), original.clone(), [1; 32]))
+                )
+                .is_err()
+            );
+        }
+    }
+
+    #[test]
+    fn review_reference_comparison_rejects_a_changed_copy_and_preserves_original_bytes() {
+        let config = review_config();
+        let original = review_user_journal();
+        let directory =
+            std::env::temp_dir().join(format!("rolauncher-review-{}", uuid::Uuid::new_v4()));
+        std::fs::create_dir(&directory).unwrap();
+        let path = directory.join("synthetic-user-journal.jsonl");
+        Registration::reserve(&path, original.0)
+            .unwrap()
+            .commit(original.1)
+            .unwrap();
+        let bytes = std::fs::read(&path).unwrap();
+        let independently_expected = hash(&bytes).unwrap();
+        validate_reference_copy(&config, [1; 32], &bytes, independently_expected).unwrap();
+        let mut changed = bytes.clone();
+        changed.push(b'\n');
+        assert!(
+            validate_reference_copy(&config, [1; 32], &changed, independently_expected).is_err()
+        );
+        assert!(validate_reference_copy(&config, [2; 32], &bytes, independently_expected).is_err());
+        assert_eq!(std::fs::read(&path).unwrap(), bytes);
+        std::fs::remove_dir_all(directory).unwrap();
+    }
 
     #[test]
     fn legacy_machine_creation_requires_lab_command_before_any_native_creation() {

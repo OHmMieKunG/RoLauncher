@@ -19,7 +19,7 @@ No new machine keys, key ACL changes, accounts, services, installer changes or p
 | Read-only Windows inspection | Windows 26H2 build 26300.9457; unelevated unrestricted interactive process token; software flags 34 and TPM flags 1; both report descriptor/RSA support |
 | Current default receipt directory | 56 deletion successes and zero incomplete; this narrower scope does **not** supersede aggregate preflight |
 | Portable policy/journal tests | 15 passed; synthetic inputs and filesystem fixtures, not OS isolation evidence |
-| Windows guard/configuration tests | 2 passed; token/SID parsing and legacy machine-create rejection; no key creation |
+| Windows lab validation tests | 11 passed: two existing guards and nine deterministic review regressions; no key creation |
 | Receipt/source tests | 5 passed; receipt corruption, ambiguous deletion status, exclusive baselines, hash changes and source isolation |
 | Application Rust regression | 111 passed; existing UI bootstrap test remains ignored locally |
 | Desktop regression | 74 existing model/editor/update checks passed; no installer or UI smoke execution locally |
@@ -162,8 +162,28 @@ Compare original public references locally; only executed checks on unchanged pi
 
 ### 4. Genuine B probes a public copy
 
-A manually copies only its public user journal to a read-only shared lab location without changing CNG ACLs.
-Keep bytes unchanged: editing/reformatting the canonical journal invalidates it.
+A first runs `lab-check` successfully in its genuine standard-user session and retains its original private user journal.
+A computes the SHA256 of that original file locally and gives P the digest through a separate authenticated human handoff.
+Do not derive the expected digest from B's copy, publish it, or include it in evidence uploads.
+
+```powershell
+# A: $originalUserJournal is A's original local journal, not a supplied public copy.
+& $poc lab-check
+$localComparison = (Get-FileHash -LiteralPath $originalUserJournal -Algorithm SHA256).Hash
+```
+
+P obtains a byte-identical public copy from A and runs this command in the authorized disposable lab:
+
+```powershell
+# P elevated; type the digest independently obtained from A when prompted.
+& $poc lab-pin-user $reviewedOriginalUserJournalCopy --authorized-disposable-lab
+```
+
+The command compares one bounded in-memory copy with P's separately entered digest and validates the canonical journal, machine binding, `user_name` and public metadata.
+It exclusively creates an administrator-owned protected local reference readable by A/B; it never overwrites an existing reference or changes any key ACL.
+The human-controlled P/A comparison is an explicit lab trust prerequisite, not hardware attestation or production enrollment authority.
+
+A separately supplies B a public copy without changing CNG ACLs; keep bytes unchanged.
 In a genuine B interactive session:
 
 ```powershell
@@ -173,6 +193,8 @@ In a genuine B interactive session:
 ```
 
 Require `designated_user_b_live_token=true` and a standard account; inspect independent M/U native open and sign outcomes.
+Require `original_user_evidence=matched_protected_independent_reference` before attributing U operations to A's enrolled key.
+If the reference is missing, torn, unprotected, stale or mismatched, the result is `unverified` and U's native probe is not attempted.
 `lab-check` must fail authorization; successful `lab-observe` means observations were collected, not that isolation passed.
 Missing/unreadable user-store keys and unsupported operations remain their actual outcomes; no simulated SID test establishes ACL enforcement.
 
@@ -201,6 +223,8 @@ No automatic fault injection, real-profile modification or privileged remediatio
 ```
 
 These commands verify PoC namespace, provider, scope, live owner, exact public key, current ACL and immutable receipt history before deletion.
+Machine recovery additionally requires the complete protected fixed machine registration, matching lab UUID/configuration and exact reserved/committed key identity.
+Foreign-lab receipts and incomplete/torn registration are rejected before opening a key or accepting a prior cleanup result; partial receipts remain untouched.
 Missing public evidence, changed owner/ACL, denied access, torn receipts and ambiguous keysets retain incomplete accounting.
 Old owner/SYSTEM-only machine receipts are not automatically adopted into the new ACL model; their cleanup remains separately authorized.
 
@@ -248,7 +272,7 @@ cargo fmt --check
 cargo clippy --locked --all-targets -- -D warnings
 ```
 
-Clean hosted Windows runs the original 20 PoC tests plus 17 new tests; Linux runs the portable subset.
+Clean hosted Windows runs the original 20 PoC tests plus 26 new tests; Linux runs the portable subset.
 The existing identity evidence job now probes only user keys and Candidate B diagnostics; automatic machine probes and A/C creation are removed.
 Legacy machine create/recovery commands reject the unguarded path; no required check names, workflows, permissions, release intent or publishing configuration changed.
 
@@ -263,6 +287,22 @@ Hosted execution for implementation commit `fc1cb5c70fe3841e0c6cfe5af0126229b38d
 
 These runs were queued when linked; consult their actual conclusions and [Draft PR #27](https://github.com/oangsa/RoLauncher/pull/27) for subsequent status.
 Later documentation-only commits do not convert those runs into native lab evidence.
+
+### Independent review corrections
+
+Reviewed head: `955449bb80f7d07ecc78ee8da24df354af63b398`; the owner reported its hosted checks green.
+The following changes address P2-01/P2-02; updated exact-head CI results and links are recorded in Draft PR #27.
+
+- **P2-01:** Recovery compares the requested full lab configuration with independently protected registration and matches the complete receipt key to its planned/committed identity.
+- **P2-02:** Observations enforce `user_name` consistency and exact U equality against the separate P-protected reference; unverified inputs never cause a U probe.
+- **TDD:** Three recovery regressions and three observation regressions failed against the extracted prior behavior before their fixes; all now pass.
+- **Controls:** Authentic receipt/copy, terminal cleanup attribution, per-field key substitution and independently compared journal bytes add three passing regression controls.
+
+The nine added review tests use synthetic references and temporary journals; they do not provision keys or prove native P/A/B isolation.
+All 173 pre-existing receipt hashes still match the retained baseline; all four incomplete records remain preserved.
+No privileged provisioning, reference capture, ACL mutation or cleanup ran on the developer machine.
+
+Files modified by this review correction: `src/identity_poc/lab.rs`, `src/identity_poc/windows.rs`, `src/identity_poc/provisioning.rs`, `scripts/identity-lab.py`, and this document.
 
 ## Proposed Owner Decisions and blockers
 

@@ -112,7 +112,7 @@ def check_sources(root):
         if "identity_poc" in path.read_text(encoding="utf-8"):
             issues.append("production_identity_import")
     for path in (root / ".github/workflows").glob("*.yml"):
-        if re.search(r"lab-(provision|enroll|rights|recover)|key-probe\s+\S+\s+machine|measure\s+[AC]\b", path.read_text(encoding="utf-8")):
+        if re.search(r"lab-(provision|enroll|rights|recover|pin-user)|key-probe\s+\S+\s+machine|measure\s+[AC]\b", path.read_text(encoding="utf-8")):
             issues.append("hosted_privileged_command")
     runner = (root / "scripts/test-identity-poc.ps1").read_text(encoding="utf-8")
     if "foreach ($taskScope in @('user'))" not in runner or "foreach ($taskCandidate in @('B'))" not in runner:
