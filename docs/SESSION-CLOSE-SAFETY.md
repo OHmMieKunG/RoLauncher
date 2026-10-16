@@ -55,6 +55,10 @@ No authorization token or permit escapes these functions.
 Commands linearize before or after each synchronous close effect under the existing mutex.
 OS coordination remains a separate input; no license policy or licensing network request is introduced.
 
+The shared monitor scan runs outside the command mutex and supplies passive retired observations.
+Missing, ambiguous, obsolete or denied records add no discovery calls under the mutex.
+Each actionable retired close requires one fresh scan under the mutex, including every force attempt; shared observations alone never authorize close.
+
 ## Graceful, force and denial behavior
 
 - Successful graceful submission starts an in-memory timer bound to account, full intent and exact process identity.
@@ -65,6 +69,8 @@ OS coordination remains a separate input; no license policy or licensing network
 - Changed recovery settings, recovered connection, lost coordination, ambiguous ownership or native errors stop escalation.
 - Denial retains client/process evidence, reports an attention state and does not consume another recovery retry.
 - Failed close attempts are latched in memory even if persisting their denial fails; no tick can silently retry with stronger force.
+- Unchanged denied/attention state performs no storage call or snapshot broadcast; initial transitions emit through the commit boundary once.
+- Failed denial saves remain retryable until durable, while the in-memory latch blocks close; a new explicit command starts fresh intent.
 - A natural exit after a denied close does not silently resume replacement. An explicit valid command is required.
 - Confirmed exit of a current client preserves explicit Stop authority for separate retired clients still awaiting cleanup.
 - Current eligible recovery schedules its existing retry only after a successful graceful submission.
@@ -102,6 +108,8 @@ No application release version or credential format changes.
 The tests exercise engine commands/signals, injected process discovery and close effects, persistence/reopen, and asynchronous/concurrent command ordering.
 All managed-client effect tests use synthetic identities; no test launches or closes Roblox.
 The native Windows negative test refuses graceful and force close against the test host with a mismatching creation identity.
+Discovery-counter tests cover 256 passive records, mixed passive/actionable cleanup, concurrent commands and stale observations before graceful or force close.
+Storage-counter and event tests cover repeated owned/retired denials, failed persistence, sticky recovery denial and fresh Stop/Restart intent.
 
 Run on Windows or Linux:
 

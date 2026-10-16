@@ -85,6 +85,233 @@ impl Drop for Fixture {
 }
 
 #[test]
+fn passive_retired_records_do_not_repeat_process_discovery() {
+    let f = Fixture::new();
+    f.engine
+        .transaction(|s| {
+            for index in 0..256 {
+                s.database.retired_launches.push(RetiredLaunch {
+                    tracker: format!("passive-{index}"),
+                    generation: Uuid::new_v4(),
+                    account_id: "1".into(),
+                    deadline: Utc::now() + ChronoDuration::seconds(90),
+                    close_intent: None,
+                    process: None,
+                });
+            }
+            Ok(())
+        })
+        .unwrap();
+    let retired = f
+        .engine
+        .0
+        .state
+        .lock()
+        .unwrap()
+        .database
+        .retired_launches
+        .clone();
+    let mut discoveries = 0;
+    let mut attempts = CloseAttempts::default();
+    for old in &retired {
+        f.engine
+            .close_retired(
+                old,
+                &[],
+                Instant::now(),
+                &mut attempts,
+                || {
+                    discoveries += 1;
+                    Ok(Vec::new())
+                },
+                |_, _| panic!("passive observation cannot close"),
+            )
+            .unwrap();
+    }
+    assert_eq!(discoveries, 0, "one shared monitor scan is sufficient");
+}
+
+#[test]
+fn shared_retired_observation_allows_commands_and_only_actionable_records_rescan() {
+    let f = Fixture::new();
+    let (active, mut players) = pending_stop(&f);
+    f.engine
+        .transaction(|s| {
+            for index in 0..256 {
+                let generation = Uuid::new_v4();
+                s.database.retired_launches.push(RetiredLaunch {
+                    tracker: format!("passive-{index}"),
+                    generation,
+                    account_id: "1".into(),
+                    deadline: Utc::now() + ChronoDuration::seconds(90),
+                    close_intent: None,
+                    process: (index < 32).then(|| ProcessIdentity {
+                        pid: 10000 + index,
+                        creation_time: format!("passive-{index}"),
+                        tracker: format!("passive-{index}"),
+                        generation,
+                    }),
+                });
+            }
+            Ok(())
+        })
+        .unwrap();
+    players.extend(
+        f.engine
+            .0
+            .state
+            .lock()
+            .unwrap()
+            .database
+            .retired_launches
+            .iter()
+            .filter_map(|r| r.process.as_ref())
+            .map(|p| platform::Player {
+                pid: p.pid,
+                creation_time: p.creation_time.clone(),
+                tracker: p.tracker.clone(),
+            }),
+    );
+    let engine = f.engine.clone();
+    let (scanning, shared_scan) = std::sync::mpsc::channel();
+    let (supply, observation) = std::sync::mpsc::channel::<Vec<platform::Player>>();
+    let (verifying, fresh_scan) = std::sync::mpsc::channel();
+    let (resume, continue_scan) = std::sync::mpsc::channel();
+    let worker = std::thread::spawn(move || {
+        // Model the monitor's shared discovery outside the command mutex.
+        scanning.send(()).unwrap();
+        let players = observation.recv().unwrap();
+        let retired = engine
+            .0
+            .state
+            .lock()
+            .unwrap()
+            .database
+            .retired_launches
+            .clone();
+        let mut discoveries = 0;
+        let mut effects = Vec::new();
+        let mut attempts = CloseAttempts::default();
+        for old in retired.iter().rev() {
+            engine
+                .close_retired(
+                    old,
+                    &players,
+                    Instant::now(),
+                    &mut attempts,
+                    || {
+                        discoveries += 1;
+                        assert!(engine.0.state.try_lock().is_err());
+                        verifying.send(()).unwrap();
+                        continue_scan.recv_timeout(Duration::from_secs(5)).unwrap();
+                        Ok(players.clone())
+                    },
+                    |p, force| {
+                        assert!(engine.0.state.try_lock().is_err());
+                        effects.push((p.pid, force));
+                        Ok(())
+                    },
+                )
+                .unwrap();
+        }
+        (discoveries, effects)
+    });
+    shared_scan.recv_timeout(Duration::from_secs(5)).unwrap();
+    // An unrelated command completes while the shared process scan is pending.
+    f.engine.command("2", "stop").unwrap();
+    supply.send(players.clone()).unwrap();
+    fresh_scan.recv_timeout(Duration::from_secs(5)).unwrap();
+    let engine = f.engine.clone();
+    let (starting, command_started) = std::sync::mpsc::channel();
+    let command = std::thread::spawn(move || {
+        starting.send(()).unwrap();
+        engine.command("1", "stop").unwrap()
+    });
+    command_started
+        .recv_timeout(Duration::from_secs(5))
+        .unwrap();
+    resume.send(()).unwrap();
+    let (discoveries, effects) = worker.join().unwrap();
+    command.join().unwrap();
+    assert_eq!(discoveries, 1, "256 passive records add no fresh scans");
+    assert_eq!(effects, vec![(4201, false)]);
+    // The command and close serialized; stale pre-command observations cannot close again.
+    f.engine.command("1", "stop").unwrap();
+    assert!(
+        f.engine
+            .close_retired(
+                &active,
+                &players,
+                Instant::now(),
+                &mut CloseAttempts::default(),
+                || panic!("superseded record cannot discover"),
+                |_, _| panic!("superseded record cannot close"),
+            )
+            .is_err()
+    );
+}
+
+#[test]
+fn shared_observation_never_replaces_fresh_verification_for_graceful_or_force() {
+    for force in [false, true] {
+        for failure in ["ambiguous", "pid", "creation", "missing", "error"] {
+            let f = Fixture::new();
+            let (mut old, players) = pending_stop(&f);
+            let now = Instant::now();
+            let mut attempts = CloseAttempts::default();
+            if force {
+                assert!(
+                    f.engine
+                        .close_retired(
+                            &old,
+                            &players,
+                            now,
+                            &mut attempts,
+                            || Ok(players.clone()),
+                            |_, force| {
+                                assert!(!force);
+                                Ok(())
+                            },
+                        )
+                        .unwrap()
+                );
+                old = f.engine.0.state.lock().unwrap().database.retired_launches[0].clone();
+            }
+            let mut discoveries = 0;
+            f.engine
+                .close_retired(
+                    &old,
+                    &players,
+                    now + Duration::from_secs(6),
+                    &mut attempts,
+                    || {
+                        discoveries += 1;
+                        let mut fresh = players.clone();
+                        match failure {
+                            "ambiguous" => fresh.push(platform::Player {
+                                pid: 9999,
+                                creation_time: "other".into(),
+                                tracker: old.tracker.clone(),
+                            }),
+                            "pid" => fresh[0].pid = 9999,
+                            "creation" => fresh[0].creation_time = "reused".into(),
+                            "missing" => fresh.clear(),
+                            _ => return Err("synthetic discovery error".into()),
+                        }
+                        Ok(fresh)
+                    },
+                    |_, _| panic!("shared observation must not authorize a close"),
+                )
+                .unwrap();
+            assert_eq!(discoveries, 1, "{failure}, force={force}");
+            let record = f.engine.0.state.lock().unwrap().database.retired_launches[0].clone();
+            assert_eq!(record.process.unwrap().creation_time, "synthetic-1");
+            assert!(record.close_intent.unwrap().denied);
+        }
+    }
+}
+
+#[test]
 fn restart_closes_current_generation_but_stale_restart_cannot_close_newer_client() {
     let f = Fixture::new();
     let old = f.account();
@@ -517,6 +744,274 @@ fn pending_stop(f: &Fixture) -> (RetiredLaunch, Vec<platform::Player>) {
         }],
     )
 }
+
+#[test]
+fn repeated_owned_denial_has_no_storage_or_broadcast_work_and_accepts_new_commands() {
+    for action in ["stop", "restart"] {
+        let f = Fixture::new();
+        f.recovery();
+        let now = Instant::now();
+        let mut attempts = CloseAttempts::default();
+        assert_eq!(f.tick(&f.account(), now, &mut attempts), vec![false]);
+        f.engine.set_launch_allowed(false);
+        assert!(
+            f.tick(&f.account(), now + Duration::from_secs(6), &mut attempts)
+                .is_empty()
+        );
+        let denied = f.account().close_intent.unwrap();
+        assert!(denied.denied);
+        let saves = f.engine.0.store.save_calls.load(Ordering::Relaxed);
+        let mut events = f.engine.subscribe();
+        for offset in [12, 18, 24] {
+            assert!(
+                f.tick(
+                    &f.account(),
+                    now + Duration::from_secs(offset),
+                    &mut attempts
+                )
+                .is_empty()
+            );
+        }
+        assert_eq!(f.engine.0.store.save_calls.load(Ordering::Relaxed), saves);
+        assert!(matches!(
+            events.try_recv(),
+            Err(broadcast::error::TryRecvError::Empty)
+        ));
+        f.engine.set_launch_allowed(true);
+        f.engine.command("1", action).unwrap();
+        assert_ne!(f.account().close_intent.as_ref().unwrap().id, denied.id);
+        assert_eq!(
+            f.tick(&f.account(), now + Duration::from_secs(30), &mut attempts),
+            vec![false]
+        );
+    }
+}
+
+#[test]
+fn repeated_retired_denial_has_no_storage_or_broadcast_work_and_accepts_fresh_stop() {
+    let f = Fixture::new();
+    let (old, players) = pending_stop(&f);
+    let now = Instant::now();
+    let mut attempts = CloseAttempts::default();
+    f.engine
+        .close_retired(
+            &old,
+            &players,
+            now,
+            &mut attempts,
+            || Ok(players.clone()),
+            |_, _| Err("synthetic close failure".into()),
+        )
+        .unwrap_err();
+    let denied = f.engine.0.state.lock().unwrap().database.retired_launches[0]
+        .close_intent
+        .clone()
+        .unwrap();
+    assert!(denied.denied);
+    let saves = f.engine.0.store.save_calls.load(Ordering::Relaxed);
+    let mut events = f.engine.subscribe();
+    for offset in [6, 12, 18] {
+        let old = f.engine.0.state.lock().unwrap().database.retired_launches[0].clone();
+        f.engine
+            .close_retired(
+                &old,
+                &players,
+                now + Duration::from_secs(offset),
+                &mut attempts,
+                || panic!("denied intent must not discover again"),
+                |_, _| panic!("denied intent must not close again"),
+            )
+            .unwrap();
+    }
+    assert_eq!(f.engine.0.store.save_calls.load(Ordering::Relaxed), saves);
+    assert!(matches!(
+        events.try_recv(),
+        Err(broadcast::error::TryRecvError::Empty)
+    ));
+    f.engine.command("1", "stop").unwrap();
+    let old = f.engine.0.state.lock().unwrap().database.retired_launches[0].clone();
+    assert_ne!(old.close_intent.as_ref().unwrap().id, denied.id);
+    assert!(
+        f.engine
+            .close_retired(
+                &old,
+                &players,
+                now + Duration::from_secs(30),
+                &mut attempts,
+                || Ok(players.clone()),
+                |_, force| {
+                    assert!(!force);
+                    Ok(())
+                },
+            )
+            .unwrap()
+    );
+}
+
+#[test]
+fn owned_denial_retries_only_unsaved_state_and_never_restores_automatic_force() {
+    let f = Fixture::new();
+    f.recovery();
+    let now = Instant::now();
+    let mut attempts = CloseAttempts::default();
+    assert_eq!(f.tick(&f.account(), now, &mut attempts), vec![false]);
+    let blocked_path = f.path.join("accounts.json.tmp");
+    std::fs::create_dir(&blocked_path).unwrap();
+    f.engine.set_launch_allowed(false);
+    let mut events = f.engine.subscribe();
+    assert!(
+        f.tick(&f.account(), now + Duration::from_secs(6), &mut attempts)
+            .is_empty()
+    );
+    // Coordination returning does not restore the old episode's force authority.
+    f.engine.set_launch_allowed(true);
+    for offset in [12, 18] {
+        assert!(
+            f.tick(
+                &f.account(),
+                now + Duration::from_secs(offset),
+                &mut attempts
+            )
+            .is_empty()
+        );
+    }
+    assert!(matches!(
+        events.try_recv(),
+        Err(broadcast::error::TryRecvError::Empty)
+    ));
+    std::fs::remove_dir(blocked_path).unwrap();
+    assert!(
+        f.tick(&f.account(), now + Duration::from_secs(24), &mut attempts)
+            .is_empty()
+    );
+    let denied = f.account();
+    assert!(denied.close_intent.as_ref().unwrap().denied);
+    assert_eq!(denied.status, Status::NeedsAttention);
+    f.engine.signal("1", denied.generation, Signal::Connected);
+    assert_eq!(f.account().close_intent, denied.close_intent);
+    let saves = f.engine.0.store.save_calls.load(Ordering::Relaxed);
+    let mut events = f.engine.subscribe();
+    for offset in [30, 36, 42] {
+        assert!(
+            f.tick(
+                &f.account(),
+                now + Duration::from_secs(offset),
+                &mut attempts
+            )
+            .is_empty()
+        );
+    }
+    assert_eq!(f.engine.0.store.save_calls.load(Ordering::Relaxed), saves);
+    assert!(matches!(
+        events.try_recv(),
+        Err(broadcast::error::TryRecvError::Empty)
+    ));
+    f.engine.command("1", "restart").unwrap();
+    assert_eq!(
+        f.tick(&f.account(), now + Duration::from_secs(48), &mut attempts),
+        vec![false]
+    );
+}
+
+#[test]
+fn retired_denial_retries_only_unsaved_state_and_keeps_the_original_identity() {
+    let f = Fixture::new();
+    let (old, players) = pending_stop(&f);
+    let now = Instant::now();
+    let mut attempts = CloseAttempts::default();
+    assert!(
+        f.engine
+            .close_retired(
+                &old,
+                &players,
+                now,
+                &mut attempts,
+                || Ok(players.clone()),
+                |_, force| {
+                    assert!(!force);
+                    Ok(())
+                },
+            )
+            .unwrap()
+    );
+    let blocked_path = f.path.join("accounts.json.tmp");
+    std::fs::create_dir(&blocked_path).unwrap();
+    let mut events = f.engine.subscribe();
+    for offset in [6, 12, 18] {
+        let old = f.engine.0.state.lock().unwrap().database.retired_launches[0].clone();
+        assert!(
+            f.engine
+                .close_retired(
+                    &old,
+                    &players,
+                    now + Duration::from_secs(offset),
+                    &mut attempts,
+                    || Err("synthetic discovery failure".into()),
+                    |_, _| panic!("unsaved denial cannot force"),
+                )
+                .is_err()
+        );
+    }
+    assert!(matches!(
+        events.try_recv(),
+        Err(broadcast::error::TryRecvError::Empty)
+    ));
+    std::fs::remove_dir(blocked_path).unwrap();
+    let old = f.engine.0.state.lock().unwrap().database.retired_launches[0].clone();
+    assert!(
+        !f.engine
+            .close_retired(
+                &old,
+                &players,
+                now + Duration::from_secs(24),
+                &mut attempts,
+                || panic!("in-memory denial prevents rediscovery"),
+                |_, _| panic!("denial prevents force"),
+            )
+            .unwrap()
+    );
+    let saves = f.engine.0.store.save_calls.load(Ordering::Relaxed);
+    let mut events = f.engine.subscribe();
+    for offset in [30, 36, 42] {
+        let old = f.engine.0.state.lock().unwrap().database.retired_launches[0].clone();
+        assert_eq!(old.process.as_ref().unwrap().creation_time, "synthetic-1");
+        assert!(old.close_intent.as_ref().unwrap().denied);
+        assert!(
+            !f.engine
+                .close_retired(
+                    &old,
+                    &players,
+                    now + Duration::from_secs(offset),
+                    &mut attempts,
+                    || panic!("persisted denial prevents rediscovery"),
+                    |_, _| panic!("denial prevents force"),
+                )
+                .unwrap()
+        );
+    }
+    assert_eq!(f.engine.0.store.save_calls.load(Ordering::Relaxed), saves);
+    assert!(matches!(
+        events.try_recv(),
+        Err(broadcast::error::TryRecvError::Empty)
+    ));
+    f.engine.command("1", "stop").unwrap();
+    let old = f.engine.0.state.lock().unwrap().database.retired_launches[0].clone();
+    assert!(
+        f.engine
+            .close_retired(
+                &old,
+                &players,
+                now + Duration::from_secs(48),
+                &mut attempts,
+                || Ok(players.clone()),
+                |_, force| {
+                    assert!(!force);
+                    Ok(())
+                },
+            )
+            .unwrap()
+    );
+}
 #[test]
 fn late_explicit_stop_closes_and_force_requires_the_same_current_stop() {
     let f = Fixture::new();
@@ -527,6 +1022,7 @@ fn late_explicit_stop_closes_and_force_requires_the_same_current_stop() {
     f.engine
         .close_retired(
             &old,
+            &players,
             now,
             &mut attempts,
             || Ok(players.clone()),
@@ -545,6 +1041,7 @@ fn late_explicit_stop_closes_and_force_requires_the_same_current_stop() {
     f.engine
         .close_retired(
             &current,
+            &players,
             now + Duration::from_secs(6),
             &mut attempts,
             || Ok(players.clone()),
@@ -562,9 +1059,10 @@ fn late_explicit_stop_closes_and_force_requires_the_same_current_stop() {
     f.engine
         .close_retired(
             &current,
+            &players,
             now + Duration::from_secs(12),
             &mut attempts,
-            || Ok(players),
+            || Ok(players.clone()),
             |_, _| panic!("revoked Stop cannot force"),
         )
         .unwrap();
@@ -580,6 +1078,7 @@ fn retired_ambiguous_obsolete_expired_and_reused_identities_never_close() {
             f.engine
                 .close_retired(
                     &old,
+                    &players,
                     Instant::now(),
                     &mut attempts,
                     || Ok(players.clone()),
@@ -622,9 +1121,10 @@ fn retired_ambiguous_obsolete_expired_and_reused_identities_never_close() {
         f.engine
             .close_retired(
                 &old,
+                &players,
                 Instant::now() + Duration::from_secs(10),
                 &mut attempts,
-                || Ok(players),
+                || Ok(players.clone()),
                 |_, _| {
                     closed = true;
                     Ok(())
@@ -642,9 +1142,10 @@ fn retired_binding_survives_reopen_and_blocks_replacement_after_discovery_window
     f.engine
         .close_retired(
             &old,
+            &players,
             Instant::now(),
             &mut CloseAttempts::default(),
-            || Ok(players),
+            || Ok(players.clone()),
             |_, _| Ok(()),
         )
         .unwrap();
@@ -757,19 +1258,19 @@ fn legacy_retired_record_observes_without_closing() {
             Ok(())
         })
         .unwrap();
+    let players = vec![platform::Player {
+        pid: 4242,
+        creation_time: "synthetic-1".into(),
+        tracker: old.tracker.clone(),
+    }];
     let mut closed = false;
     engine
         .close_retired(
             &old,
+            &players,
             Instant::now(),
             &mut CloseAttempts::default(),
-            || {
-                Ok(vec![platform::Player {
-                    pid: 4242,
-                    creation_time: "synthetic-1".into(),
-                    tracker: old.tracker.clone(),
-                }])
-            },
+            || Ok(players.clone()),
             |_, _| {
                 closed = true;
                 Ok(())
@@ -786,15 +1287,10 @@ fn legacy_retired_record_observes_without_closing() {
     engine
         .close_retired(
             &db.retired_launches[0],
+            &players,
             Instant::now(),
             &mut CloseAttempts::default(),
-            || {
-                Ok(vec![platform::Player {
-                    pid: 4242,
-                    creation_time: "synthetic-1".into(),
-                    tracker: old.tracker.clone(),
-                }])
-            },
+            || Ok(players.clone()),
             |_, _| {
                 closed = true;
                 Ok(())
@@ -929,19 +1425,19 @@ fn confirmed_live_exit_preserves_stop_authority_for_a_separate_retired_client() 
         .unwrap()
         .retired_launches
         .remove(0);
+    let players = vec![platform::Player {
+        pid: 5300,
+        creation_time: "retired-synthetic".into(),
+        tracker: old.tracker.clone(),
+    }];
     let mut effects = Vec::new();
     f.engine
         .close_retired(
             &old,
+            &players,
             Instant::now(),
             &mut CloseAttempts::default(),
-            || {
-                Ok(vec![platform::Player {
-                    pid: 5300,
-                    creation_time: "retired-synthetic".into(),
-                    tracker: old.tracker.clone(),
-                }])
-            },
+            || Ok(players.clone()),
             |p, force| {
                 effects.push((p.pid, force));
                 Ok(())

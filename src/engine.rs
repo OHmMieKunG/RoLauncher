@@ -913,6 +913,7 @@ impl Engine {
                         }
                         let _ = self.close_retired(
                             old,
+                            &players,
                             Instant::now(),
                             &mut close_attempts,
                             platform::players,

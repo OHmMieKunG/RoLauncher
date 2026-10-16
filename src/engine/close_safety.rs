@@ -244,14 +244,18 @@ impl Engine {
             });
         }
         let Some(intent) = a.close_intent.clone() else {
-            if !a.desired_running || a.status == Status::Queued {
+            if a.status != Status::NeedsAttention
+                && (!a.desired_running || a.status == Status::Queued)
+            {
                 a.status = Status::NeedsAttention;
                 a.last_error = Some("Client preserved: no explicit close intent; inspect it and use Stop or Restart".into());
                 self.commit_close_state(&mut state, next)?;
-                let _ = self.0.events.send(snapshot(&state));
             }
             return Ok(false);
         };
+        if intent.denied && a.status == Status::NeedsAttention {
+            return Ok(false);
+        }
         let was_recovery =
             intent.reason == CloseReason::AutomaticRecovery && recovery_due(a, Utc::now());
         let policy = !attempts.blocked(&expected.id, &intent, identity)
@@ -276,7 +280,6 @@ impl Engine {
                 "{CLOSE_BLOCKED_PREFIX}intent or unique process ownership is no longer valid; inspect the client, then use Stop or Restart"
             ));
             self.commit_close_state(&mut state, next)?;
-            let _ = self.0.events.send(snapshot(&state));
             return Err("Close denied; client preserved, inspect it before retrying".into());
         }
         // Persist newly classified recovery before any destructive effect.
@@ -299,7 +302,6 @@ impl Engine {
                 "{CLOSE_BLOCKED_PREFIX}replacement readiness changed; inspect the client and retry explicitly"
             ));
             self.commit_close_state(&mut state, next)?;
-            let _ = self.0.events.send(snapshot(&state));
             return Err("Replacement readiness changed before close; client preserved".into());
         }
         let force = attempts.force(&expected.id, &intent, identity, now + started.elapsed());
@@ -319,7 +321,6 @@ impl Engine {
                     a.close_intent = Some(intent);
                     self.commit_close_state(&mut state, next)?;
                 }
-                let _ = self.0.events.send(snapshot(&state));
                 Ok(true)
             }
             Err(_) => {
@@ -332,7 +333,6 @@ impl Engine {
                     "{CLOSE_BLOCKED_PREFIX}verified process close failed; inspect the client and use Stop to retry"
                 ));
                 self.commit_close_state(&mut state, next)?;
-                let _ = self.0.events.send(snapshot(&state));
                 Err("Verified process close failed; force escalation cancelled".into())
             }
         }
@@ -340,6 +340,7 @@ impl Engine {
     pub(super) fn close_retired(
         &self,
         expected: &RetiredLaunch,
+        observed: &[platform::Player],
         now: Instant,
         attempts: &mut CloseAttempts,
         discover: impl FnOnce() -> Result<Vec<platform::Player>, String>,
@@ -357,14 +358,13 @@ impl Engine {
         }) else {
             return Err("Retired close superseded; observation retained".into());
         };
-        let discovery = discover();
-        let discovery_failed = discovery.is_err();
-        let players = discovery.unwrap_or_default();
-        let matches: Vec<_> = players
+        // The monitor's shared scan can bind or reject observation-only records.
+        // It never grants close authority; actionable candidates get a fresh scan below.
+        let matches: Vec<_> = observed
             .iter()
             .filter(|p| p.tracker == expected.tracker)
             .collect();
-        if matches.is_empty() && !discovery_failed && expected.process.is_none() {
+        if matches.is_empty() && expected.process.is_none() {
             return Ok(false);
         }
         let mut binding_expired = false;
@@ -392,21 +392,30 @@ impl Engine {
                             a.account.close_intent.as_ref() == Some(intent)
                                 && eligible(&a.account, intent, next.network_suspended, false)
                         })
-                    && verified_unique(&next, &expected.account_id, identity, &players, true)
+                    && verified_unique(&next, &expected.account_id, identity, observed, true)
+                    && discover().is_ok_and(|players| {
+                        verified_unique(&next, &expected.account_id, identity, &players, true)
+                    })
             });
         if !allowed {
+            let mut changed = next.database.retired_launches[index].process != expected.process;
             if let Some(intent) = &mut next.database.retired_launches[index].close_intent {
+                changed |= !intent.denied;
                 intent.denied = true;
             }
             if let Some((identity, intent)) = identity.as_ref().zip(intent.as_ref()) {
                 attempts.deny(&expected.account_id, intent, identity, now);
             }
-            if let Ok(a) = account_mut(&mut next, &expected.account_id) {
+            if let Ok(a) = account_mut(&mut next, &expected.account_id)
+                && (changed || a.status != Status::NeedsAttention || a.last_error.is_none())
+            {
+                changed = true;
                 a.status = Status::NeedsAttention;
                 a.last_error = Some("Late client preserved: close intent or unique ownership is unverified; inspect the client, then use Stop after discovery resolves".into());
             }
-            self.commit_close_state(&mut state, next)?;
-            let _ = self.0.events.send(snapshot(&state));
+            if changed {
+                self.commit_close_state(&mut state, next)?;
+            }
             return Ok(false);
         }
         let identity = identity.unwrap();
@@ -434,7 +443,6 @@ impl Engine {
                     Some("Late client close failed; inspect it and use Stop to retry".into());
             }
             self.commit_close_state(&mut state, next)?;
-            let _ = self.0.events.send(snapshot(&state));
             return Err("Late client close failed; force escalation cancelled".into());
         }
         attempts.record(
@@ -443,7 +451,6 @@ impl Engine {
             &identity,
             now + started.elapsed(),
         );
-        let _ = self.0.events.send(snapshot(&state));
         Ok(true)
     }
 }
