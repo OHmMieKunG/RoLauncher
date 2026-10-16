@@ -19,7 +19,7 @@ No new machine keys, key ACL changes, accounts, services, installer changes or p
 | Read-only Windows inspection | Windows 26H2 build 26300.9457; unelevated unrestricted interactive process token; software flags 34 and TPM flags 1; both report descriptor/RSA support |
 | Current default receipt directory | 56 deletion successes and zero incomplete; this narrower scope does **not** supersede aggregate preflight |
 | Portable policy/journal tests | 15 passed; synthetic inputs and filesystem fixtures, not OS isolation evidence |
-| Windows lab validation tests | 11 passed: two existing guards and nine deterministic review regressions; no key creation |
+| Windows lab validation tests | 12 passed: two existing guards and ten deterministic review regressions; no key creation |
 | Receipt/source tests | 5 passed; receipt corruption, ambiguous deletion status, exclusive baselines, hash changes and source isolation |
 | Application Rust regression | 111 passed; existing UI bootstrap test remains ignored locally |
 | Desktop regression | 74 existing model/editor/update checks passed; no installer or UI smoke execution locally |
@@ -272,7 +272,7 @@ cargo fmt --check
 cargo clippy --locked --all-targets -- -D warnings
 ```
 
-Clean hosted Windows runs the original 20 PoC tests plus 26 new tests; Linux runs the portable subset.
+Clean hosted Windows runs the original 20 PoC tests plus 27 new tests; Linux runs the portable subset.
 The existing identity evidence job now probes only user keys and Candidate B diagnostics; automatic machine probes and A/C creation are removed.
 Legacy machine create/recovery commands reject the unguarded path; no required check names, workflows, permissions, release intent or publishing configuration changed.
 
@@ -296,9 +296,10 @@ The following changes address P2-01/P2-02; updated exact-head CI results and lin
 - **P2-01:** Recovery compares the requested full lab configuration with independently protected registration and matches the complete receipt key to its planned/committed identity.
 - **P2-02:** Observations enforce `user_name` consistency and exact U equality against the separate P-protected reference; unverified inputs never cause a U probe.
 - **TDD:** Three recovery regressions and three observation regressions failed against the extracted prior behavior before their fixes; all now pass.
+- **Ambiguous cleanup:** A further failing regression now rejects prior-deletion/absence labels lacking sufficient native status, including `NTE_BAD_KEYSET`.
 - **Controls:** Authentic receipt/copy, terminal cleanup attribution, per-field key substitution and independently compared journal bytes add three passing regression controls.
 
-The nine added review tests use synthetic references and temporary journals; they do not provision keys or prove native P/A/B isolation.
+The ten added review tests use synthetic references and temporary journals; they do not provision keys or prove native P/A/B isolation.
 All 173 pre-existing receipt hashes still match the retained baseline; all four incomplete records remain preserved.
 No privileged provisioning, reference capture, ACL mutation or cleanup ran on the developer machine.
 

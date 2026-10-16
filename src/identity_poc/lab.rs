@@ -671,6 +671,13 @@ fn validate_recovery_registration(
                 .into(),
         );
     }
+    if (record.cleanup == Some(recovery::CleanupOutcome::Succeeded)
+        && record.native_status != Some(0))
+        || (record.cleanup == Some(recovery::CleanupOutcome::Absent)
+            && !matches!(record.native_status, Some(0 | 0x80090011)))
+    {
+        return Err("prior disposal lacks exact native evidence; retain receipt for review".into());
+    }
     Ok(())
 }
 
@@ -1110,6 +1117,9 @@ mod tests {
         ] {
             let mut record = review_receipt(key.clone());
             record.cleanup = cleanup;
+            if cleanup == Some(recovery::CleanupOutcome::Succeeded) {
+                record.native_status = Some(0);
+            }
             validate_recovery_registration(
                 &config,
                 &record,
@@ -1277,6 +1287,27 @@ mod tests {
         assert!(validate_reference_copy(&config, [2; 32], &bytes, independently_expected).is_err());
         assert_eq!(std::fs::read(&path).unwrap(), bytes);
         std::fs::remove_dir_all(directory).unwrap();
+    }
+
+    #[test]
+    fn review_recovery_never_accepts_ambiguous_status_as_prior_deletion_or_absence() {
+        let config = review_config();
+        let key = review_key();
+        for cleanup in [
+            recovery::CleanupOutcome::Succeeded,
+            recovery::CleanupOutcome::Absent,
+        ] {
+            let mut record = review_receipt(key.clone());
+            record.cleanup = Some(cleanup);
+            assert!(
+                validate_recovery_registration(
+                    &config,
+                    &record,
+                    Ok((config.clone(), key.clone(), [1; 32]))
+                )
+                .is_err()
+            );
+        }
     }
 
     #[test]
