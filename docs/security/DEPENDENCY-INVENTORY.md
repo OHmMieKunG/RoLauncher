@@ -12,7 +12,9 @@ Application version and dependency locks are unchanged.
 
 ```powershell
 . ./scripts/environment.ps1
-python scripts/security-inventory.py --nuget-cache .tools/nuget --nuget-cache .tools/linux-nuget --rust-audit docs/security/vulnerability-baseline.json --output docs/security/dependency-inventory.json
+python scripts/security.py audit --kind nuget --project desktop/RoLauncher.Desktop.csproj > target/nuget-windows.json
+# Run the Linux audit with its native SDK and retain its sanitized output as target/nuget-linux.json.
+python scripts/security-inventory.py --nuget-cache .tools/nuget --nuget-cache .tools/linux-nuget --rust-audit docs/security/vulnerability-baseline.json --nuget-audit desktop=target/nuget-windows.json --nuget-audit desktop.linux=target/nuget-linux.json --output docs/security/dependency-inventory.json
 ```
 
 Use actual restored cache paths on another machine. Metadata collection is locked/offline and never builds or upgrades dependencies.
@@ -42,7 +44,7 @@ Use [vulnerability baseline](VULNERABILITY-BASELINE.md) and [license register](P
 |---|---|---|
 | WebView2 binding/loader | webview2-com/sys 0.39.1; NuGet Microsoft.Web.WebView2 1.0.3179.45 | Loader is bundled; runtime is an independently installed prerequisite; SDK notice is included |
 | Windows App SDK | 1.8.260921001 and exact subpackage versions in JSON | Self-contained desktop; Microsoft terms require explicit redistribution review |
-| .NET | Windows local SDK 8.0.425/runtime 8.0.31; Linux SDK selected by global.json/installed toolchain | Self-contained published runtime packs are not covered completely by `dotnet list package`; record each actual release payload |
+| .NET | Windows local SDK 8.0.425/runtime 8.0.31; Linux SDK 10.0.401/runtime 10.0.12; test runtime 8.0.31 | Self-contained published runtime packs are not covered completely by `dotnet list package`; record each actual release payload |
 | Inno Setup | Local downloaded 6.7.3; build accepts installed 6.7+ or 7 | Build tool and installer engine; license notice exists; compiler selection is not content-pinned |
 | GCC/MinGW | Optional `.tools/gcc/mingw64`; host/toolchain dependent | No runtime DLL copies found in current build script; inspect static linkage and actual imports per payload before deciding obligations |
 | Linux native stack | DBus, Secret Service, GTK/WebKit, AppIndicator, X11/GL/fontconfig, portals | OS-provided, version dependent; native assets from NuGet may be bundled; no blanket redistribution clearance |

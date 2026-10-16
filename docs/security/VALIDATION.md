@@ -8,8 +8,8 @@ This report distinguishes local executions from hosted CI; no merge or release i
 | Check | Evidence/result |
 |---|---|
 | TDD CLI/policy seams | User approved scanner CLI, audit decisions and workflow trust boundary; red/green cycles captured under ignored `target/pr02/tdd-red-*.log` |
-| Security suite | 12 tests pass on Windows with all three real pinned scanners; Linux initial 11-test run passed, final rerun pending |
-| Clean source/history | No Gitleaks matches in initial tracked tree or 62 available historical commits; final new files require staged-tree scan |
+| Security suite | 13 tests pass on both Windows and native Arch WSL with all three real pinned scanners; no cases skipped |
+| Clean source/history | No Gitleaks matches in initial tracked tree, staged PR02 files or 62 available historical commits |
 | Synthetic clean/false positives | Harmless environment references and documentation URL remain clean |
 | Synthetic credential detection | PAT, Roblox cookie and authenticated launch URI detected; complete values absent from CLI output; removed-in-range secret still detected |
 | Lockfile vulnerabilities | Real RustSec scan reports 10 pairs; synthetic advisory fixture retains ID and patched range without inventing merge authority |
@@ -17,16 +17,19 @@ This report distinguishes local executions from hosted CI; no merge or release i
 | License policy | Actual cargo-deny fixtures distinguish MIT, missing license and GPL-2.0-only outside reviewed allowlist |
 | Scanner/process errors | Absent executable, bad process output and tampered tool archive return unverified; tampered executable is not extracted/executed |
 | Untrusted PR safety | Parsed workflow test checks PR events, read-only permissions, immutable Action pins, nonpersisted credentials and no custom secrets/artifact upload |
-| Windows Rust | 111 passed, one existing ignored bootstrap; standalone bootstrap rerun pending after UI smoke |
+| Windows Rust | 111 passed, plus explicit ignored bootstrap passed; no PR07 safety test skipped |
 | Linux Rust | 108 passed, one existing ignored disposable Flatpak test; formatting and Clippy pass |
-| Desktop | Windows 74 checks passed; Linux initial run failed missing targeting pack, locked restore/rerun underway |
-| WinUI | Build passed; first smoke failed animation time-zero assertion; isolated rerun underway, no application code changed |
+| Desktop | 74 checks pass on Windows and native Linux; initial Linux environment failures resolved with locked restore and checksum-verified official .NET 8.0.31 runtime |
+| WinUI | Build and isolated full smoke pass; first smoke failed animation time-zero assertion; no application code changed |
+| Rust static checks | Formatting and Clippy pass on Windows and Linux |
 | Release governance | Existing 30 promotion tests pass on Linux; Windows governance/versioning/beta tests passed before UI stage; version check remains 1.7.0 |
-| Hosted CI | Not yet claimed; exact run/head/checkout evidence will be added after draft creation |
+| Hosted security CI | All three jobs passed on initial head `64242d10045bd62691d77d1d2fbd5c39926fd5fb`: [run 38854244395](https://github.com/oangsa/RoLauncher/actions/runs/38854244395); final-head evidence follows in the PR handoff |
 
 The initial full Windows command stopped at smoke; it is not recorded as a completely passing full run.
 Private local logs stay under ignored `target/pr02`; scanner raw secret matches are temporary and are not uploaded.
 No live Roblox sessions or production credentials were used.
+Existing local Windows payload, source ZIP and representative historical Linux payload scans also found no detector matches.
+Actionlint 1.7.12 passed the new workflow; `check-release.py` verified unchanged 1.7.0 metadata.
 
 ## Scope verification
 

@@ -7,9 +7,11 @@ No real credential value is included in this report, scanner output, tests or CI
 
 | Scope | Result |
 |---|---|
-| Current tracked Rust/C#/scripts/workflows/configuration/docs/installer/assets | No detector matches at the reviewed base; repeat with final PR files before push |
+| Current tracked Rust/C#/scripts/workflows/configuration/docs/installer/assets | No detector matches at the reviewed base or staged PR02 source scan |
 | All locally available refs/history, 62 commits at initial scan | No detector matches; includes PR01/PR07 and historical source |
 | Existing local `dist/rolauncher-v1.7.0` Windows payload | No detector matches; local output, not proof about published release bytes |
+| Existing local `dist/rolauncher-v1.7.0-source.zip` | No detector matches, including archive traversal |
+| Existing local Linux `1.6.0-dev.80c754cda96d` payload | No detector matches; historical representative output, not current release certification |
 | Synthetic clean fixture | Clean |
 | Generated PAT/cookie/authenticated-launch canaries | Detected; output contains rule/path/line/commit only |
 | Secret introduced then removed within a PR range | Detected in history; removal from the final tree does not hide it |

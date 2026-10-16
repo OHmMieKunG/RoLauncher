@@ -33,7 +33,7 @@ def reachable(graph, runtime):
     return seen
 
 
-def inventory(caches, rust_audit):
+def inventory(caches, rust_audit, nuget_audits):
     graphs = {}
     for target in (*TARGETS, "all"):
         command = ["cargo", "metadata", "--locked", "--offline", "--format-version", "1"]
@@ -99,6 +99,9 @@ def inventory(caches, rust_audit):
                     "direct": package["type"] == "Direct", "content_hash": package.get("contentHash"),
                     "dependencies": package.get("dependencies", {}), "license": license,
                     "repository": upstream, "notice_evidence": evidence, "asset_kinds": asset_kinds,
+                    "advisory_status": ("no-known-advisory" if nuget_audits.get(project, {}).get("status") == "clean"
+                        else "known-advisory" if any(item.get("package", "").lower() == name.lower() and item.get("version") == version
+                            for item in nuget_audits.get(project, {}).get("findings", [])) else "unverified"),
                     "scope": "test-only" if project == "desktop.tests" else (
                         "runtime-candidate" if any(k in asset_kinds for k in ("runtime", "runtimeTargets", "native", "contentFiles"))
                         else "build-or-publish-review-required")})
@@ -106,6 +109,7 @@ def inventory(caches, rust_audit):
              "desktop.tests/packages.lock.json", "desktop.linux/global.json"]
     return {"schema": 1, "inputs": {name: digest(ROOT / name) for name in files},
             "advisory_database": rust_audit.get("database"),
+            "nuget_audits": nuget_audits,
             "rust": rust, "nuget": nuget,
             "sdk": json.loads((ROOT / "desktop.linux/global.json").read_text()),
             "limits": ["runtime-candidate is graph/asset evidence, not binary reachability proof",
@@ -118,9 +122,12 @@ def main():
     parser.add_argument("--nuget-cache", action="append", type=Path, required=True)
     parser.add_argument("--output", type=Path, required=True)
     parser.add_argument("--rust-audit", type=Path, required=True)
+    parser.add_argument("--nuget-audit", action="append", default=[], metavar="PROJECT=REPORT")
     args = parser.parse_args()
     try:
-        result = inventory(args.nuget_cache, json.loads(args.rust_audit.read_text(encoding="utf-8-sig")))
+        nuget_audits = {project: json.loads(Path(path).read_text(encoding="utf-8-sig"))
+                        for project, path in (argument.split("=", 1) for argument in args.nuget_audit)}
+        result = inventory(args.nuget_cache, json.loads(args.rust_audit.read_text(encoding="utf-8-sig")), nuget_audits)
         args.output.write_text(json.dumps(result, indent=2, sort_keys=True) + "\n", encoding="utf-8")
     except (OSError, ValueError, KeyError, subprocess.SubprocessError):
         raise SystemExit("Inventory unverified; restore locked packages and retry. Raw tool output withheld.")
