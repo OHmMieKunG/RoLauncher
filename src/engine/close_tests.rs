@@ -914,6 +914,61 @@ fn owned_denial_retries_only_unsaved_state_and_never_restores_automatic_force() 
 }
 
 #[test]
+fn unsaved_first_recovery_denial_cannot_regain_authority_with_a_new_automatic_intent() {
+    for new_episode in ["same", "reconnect", "target"] {
+        let f = Fixture::new();
+        f.engine
+            .patch(
+                "1",
+                AccountPatch {
+                    fallback_policy: Some(FallbackPolicy::AllowPublic),
+                    ..Default::default()
+                },
+            )
+            .unwrap();
+        f.recovery();
+        let now = Instant::now();
+        let mut attempts = CloseAttempts::default();
+        let blocked_path = f.path.join("accounts.json.tmp");
+        std::fs::create_dir(&blocked_path).unwrap();
+        let a = f.account();
+        assert!(
+            f.engine
+                .close_owned(
+                    &a,
+                    now,
+                    &mut attempts,
+                    || Err("synthetic discovery failure".into()),
+                    |_, _| panic!("unverified recovery cannot close"),
+                )
+                .is_err()
+        );
+        assert!(
+            f.account().close_intent.is_none(),
+            "failed save rolled back new classification"
+        );
+        std::fs::remove_dir(blocked_path).unwrap();
+        if new_episode == "reconnect" {
+            f.engine.signal("1", a.generation, Signal::Connected);
+            f.recovery();
+        } else if new_episode == "target" {
+            f.engine
+                .signal("1", a.generation, Signal::TargetUnavailable);
+        }
+        assert!(
+            f.tick(&f.account(), now + Duration::from_secs(6), &mut attempts)
+                .is_empty()
+        );
+        assert!(f.account().close_intent.as_ref().unwrap().denied);
+        f.engine.command("1", "restart").unwrap();
+        assert_eq!(
+            f.tick(&f.account(), now + Duration::from_secs(12), &mut attempts),
+            vec![false]
+        );
+    }
+}
+
+#[test]
 fn retired_denial_retries_only_unsaved_state_and_keeps_the_original_identity() {
     let f = Fixture::new();
     let (old, players) = pending_stop(&f);

@@ -46,7 +46,12 @@ impl CloseAttempts {
     }
     fn blocked(&self, id: &str, intent: &CloseIntent, identity: &ProcessIdentity) -> bool {
         self.0.iter().any(|a| {
-            a.denied && a.account_id == id && a.intent == *intent && a.identity == *identity
+            a.denied
+                && a.account_id == id
+                && a.identity == *identity
+                // An unsaved classification can be recreated with a fresh UUID.
+                // Only explicit commands may restore authority after denial.
+                && (a.intent == *intent || intent.reason.automatic())
         })
     }
     fn deny(&mut self, id: &str, intent: &CloseIntent, identity: &ProcessIdentity, now: Instant) {

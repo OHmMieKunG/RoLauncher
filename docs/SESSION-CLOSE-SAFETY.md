@@ -71,6 +71,7 @@ Each actionable retired close requires one fresh scan under the mutex, including
 - Failed close attempts are latched in memory even if persisting their denial fails; no tick can silently retry with stronger force.
 - Unchanged denied/attention state performs no storage call or snapshot broadcast; initial transitions emit through the commit boundary once.
 - Failed denial saves remain retryable until durable, while the in-memory latch blocks close; a new explicit command starts fresh intent.
+- An unsaved denial also blocks newly classified automatic intents for the same account/process; a new episode UUID cannot restore authority.
 - A natural exit after a denied close does not silently resume replacement. An explicit valid command is required.
 - Confirmed exit of a current client preserves explicit Stop authority for separate retired clients still awaiting cleanup.
 - Current eligible recovery schedules its existing retry only after a successful graceful submission.
