@@ -17,7 +17,9 @@ use std::{
 use tokio::sync::{Notify, broadcast};
 use uuid::Uuid;
 
+mod close_safety;
 mod management;
+use close_safety::CloseAttempts;
 mod server_selection;
 pub use management::{BulkPatch, ProfileSave};
 
@@ -60,12 +62,41 @@ fn recovery_due(account: &Account, now: chrono::DateTime<Utc>) -> bool {
             .is_some_and(|t| now - t >= ChronoDuration::seconds(30))
 }
 
+fn normalize_accounts(next: &mut State) {
+    let now = Utc::now();
+    for saved in &mut next.database.accounts {
+        let a = &mut saved.account;
+        a.track_run(now);
+        if a.status == Status::Reconnecting && a.desired_running {
+            let known_error = a.last_error.as_deref().is_some_and(|e| {
+                e.starts_with("Session lost (code") || e.starts_with("Connection failed:")
+            });
+            if known_error
+                || a.disconnected_since
+                    .is_some_and(|t| Utc::now() - t >= ChronoDuration::seconds(30))
+            {
+                a.disconnect_notified = true;
+            }
+        } else {
+            a.disconnect_notified = false;
+        }
+    }
+}
+
+fn retired_blocks_launch(database: &Database, id: &str) -> bool {
+    database
+        .retired_launches
+        .iter()
+        .any(|r| r.account_id == id && (r.process.is_some() || r.deadline > Utc::now()))
+}
+
 fn resume_after_confirmed_close(account: &mut Account) {
     let close_error = account.last_error.as_deref().is_some_and(|error| {
         error.starts_with(CLOSE_BLOCKED_PREFIX)
             || error == "Unable to close managed instance (Windows error 5)"
     });
     if account.status == Status::NeedsAttention
+        && account.close_intent.as_ref().is_none_or(|i| !i.denied)
         && close_error
         && account.process.is_none()
         && account.tracker.is_none()
@@ -200,6 +231,7 @@ impl Engine {
         self.0.shutdown.load(Ordering::Acquire)
     }
     pub fn set_launch_allowed(&self, allowed: bool) {
+        let _state = self.0.state.lock().unwrap();
         self.0.launch_allowed.store(allowed, Ordering::Release);
     }
     fn transaction<T>(
@@ -216,24 +248,7 @@ impl Engine {
         let mut current = self.0.state.lock().unwrap();
         let mut next = current.clone();
         let result = edit(&mut next)?;
-        let now = Utc::now();
-        for saved in &mut next.database.accounts {
-            let a = &mut saved.account;
-            a.track_run(now);
-            if a.status == Status::Reconnecting && a.desired_running {
-                let known_error = a.last_error.as_deref().is_some_and(|e| {
-                    e.starts_with("Session lost (code") || e.starts_with("Connection failed:")
-                });
-                if known_error
-                    || a.disconnected_since
-                        .is_some_and(|t| Utc::now() - t >= ChronoDuration::seconds(30))
-                {
-                    a.disconnect_notified = true;
-                }
-            } else {
-                a.disconnect_notified = false;
-            }
-        }
+        normalize_accounts(&mut next);
         management::record_activity(&current, &mut next);
         self.0.store.save(&next.database)?;
         while next.operations.len() > 1000 {
@@ -477,7 +492,14 @@ impl Engine {
     pub fn remove(&self, id: &str) -> Result<(), String> {
         self.transaction(|s| {
             let a = account_mut(s, id)?;
-            if a.desired_running || a.process.is_some() || a.tracker.is_some() {
+            if a.desired_running
+                || a.process.is_some()
+                || a.tracker.is_some()
+                || s.database
+                    .retired_launches
+                    .iter()
+                    .any(|r| r.account_id == id && (r.process.is_some() || r.deadline > Utc::now()))
+            {
                 return Err(
                     "Stop the account and wait for its managed instance to exit before removing it"
                         .into(),
@@ -520,22 +542,35 @@ impl Engine {
         self.transaction(|s| {
             if bot.is_some_and(|b| { let mut saved = s.database.discord.bot.clone(); saved.registration = None; !b.enabled || *b != saved || self.bot_generation().is_multiple_of(2) }) || self.is_shutdown() { return Err("Command connection changed".into()); }
             let existing = account_mut(s,id)?.clone();
-            if (action == "start" && existing.desired_running && existing.status != Status::NeedsAttention) || (action == "stop" && !existing.desired_running) {
+            if (action == "start" && existing.desired_running && existing.status != Status::NeedsAttention) || (action == "stop" && !existing.desired_running && existing.close_intent.as_ref().is_some_and(|i| i.reason == CloseReason::UserStop && !i.denied && !i.id.is_nil()) && !s.database.retired_launches.iter().any(|r| r.account_id == id && r.process.is_some() && r.close_intent != existing.close_intent)) {
                 if let Some(op) = existing.operation_id.and_then(|id|s.operations.get(&id)).cloned() { return Ok(op); }
                 let op = Operation { id:Uuid::new_v4(), account_id:id.into(), state:"completed".into(), error:None }; s.operations.insert(op.id,op.clone()); return Ok(op);
             }
             if action != "stop" { existing.target.as_ref().ok_or("Set a launch target first")?.validate()?; }
             if action!="stop" && !self.0.launch_allowed.load(Ordering::Acquire){return Err(LAUNCH_COORDINATION_ERROR.into());}
-            if action != "stop" && s.database.retired_launches.iter().any(|r|r.account_id==id && r.deadline>Utc::now()) { return Err("A cancelled launch is still being observed; wait up to 90 seconds before starting again".into()); }
+            if action != "stop" && retired_blocks_launch(&s.database, id) { return Err("A cancelled launch is still being observed; inspect late clients and use Stop, or wait for discovery to confirm exit".into()); }
             if action == "restart" && matches!(existing.status,Status::Launching|Status::Queued) { return Err("A launch is already pending; Stop it before restarting".into()); }
             if let Some(previous) = existing.operation_id.and_then(|id|s.operations.get_mut(&id)) && previous.state == "queued" { previous.state = "cancelled".into(); }
             let op = Operation { id:Uuid::new_v4(),account_id:id.into(),state:if action=="stop" && existing.process.is_none(){"completed"}else{"queued"}.into(),error:None };
+            let generation = Uuid::new_v4();
+            let close_intent = CloseIntent { id: Uuid::new_v4(), reason: match action {
+                "stop" => CloseReason::UserStop,
+                "restart" => CloseReason::ManualRestart,
+                _ => CloseReason::ManualStartReplacement,
+            }, generation, operation_id: Some(op.id), denied: false };
             if existing.process.is_none() && let Some(tracker)=existing.tracker {
-                s.database.retired_launches.push(RetiredLaunch {tracker,generation:existing.generation,account_id:id.into(),deadline:existing.ownership_deadline.unwrap_or_else(||Utc::now()+ChronoDuration::seconds(90))});
+                s.database.retired_launches.push(RetiredLaunch {tracker,generation:existing.generation,account_id:id.into(),deadline:existing.ownership_deadline.unwrap_or_else(||Utc::now()+ChronoDuration::seconds(90)), close_intent:Some(CloseIntent {reason: if action == "stop" {CloseReason::UserStop} else {CloseReason::ObsoleteLaunch}, ..close_intent.clone()}), process:None});
+            }
+            if action == "stop" {
+                for old in s.database.retired_launches.iter_mut().filter(|r| r.account_id == id) {
+                    if old.process.is_some() || old.close_intent.as_ref().is_some_and(|i| i.reason == CloseReason::UserStop && !i.denied) {
+                        old.close_intent = Some(close_intent.clone());
+                    }
+                }
             }
             let a = account_mut(s,id)?; a.finish_run(Utc::now()); a.desired_running = action != "stop";
             if a.process.is_none() { a.tracker=None;a.ownership_deadline=None; }
-            a.generation = Uuid::new_v4(); a.failures = 0; a.next_retry = None; a.connected_since = None; a.disconnected_since = None; a.last_error = None;
+            a.generation = generation; a.close_intent = if action == "stop" || a.process.is_some() { Some(close_intent) } else { None }; a.failures = 0; a.next_retry = None; a.connected_since = None; a.disconnected_since = None; a.last_error = None;
             a.status = if action == "stop" { Status::Stopped } else { Status::Queued };
             a.public_fallback_active = false; a.recovery_reason.clear(); a.operation_id = Some(op.id);
             s.operations.insert(op.id,op.clone()); Ok(op)
@@ -578,6 +613,13 @@ impl Engine {
     fn failure(&self, id: &str, generation: Uuid, error: Failure) {
         let _ = self.transaction(|s| {
             if account_mut(s, id)?.generation != generation {
+                return Ok(());
+            }
+            if account_mut(s, id)?
+                .close_intent
+                .as_ref()
+                .is_some_and(|i| i.denied)
+            {
                 return Ok(());
             }
             if error.kind == FailureKind::Network {
@@ -627,13 +669,23 @@ impl Engine {
                     continue;
                 }
             }
-            let next = self.snapshot().accounts.into_iter().find(|a| {
-                a.desired_running
-                    && a.process.is_none()
-                    && a.tracker.is_none()
-                    && matches!(a.status, Status::Queued | Status::Backoff)
-                    && a.next_retry.is_none_or(|t| t <= Utc::now())
-            });
+            let next = {
+                let state = self.0.state.lock().unwrap();
+                state
+                    .database
+                    .accounts
+                    .iter()
+                    .map(|s| &s.account)
+                    .find(|a| {
+                        a.desired_running
+                            && a.process.is_none()
+                            && a.tracker.is_none()
+                            && matches!(a.status, Status::Queued | Status::Backoff)
+                            && a.next_retry.is_none_or(|t| t <= Utc::now())
+                            && !retired_blocks_launch(&state.database, &a.id)
+                    })
+                    .cloned()
+            };
             if let Some(account) = next {
                 tokio::time::sleep_until(next_launch.into()).await;
                 if self.is_shutdown() {
@@ -661,6 +713,9 @@ impl Engine {
         }
     }
     async fn launch_one(&self, account: Account) {
+        if retired_blocks_launch(&self.0.state.lock().unwrap().database, &account.id) {
+            return;
+        }
         if !self.0.launch_allowed.load(Ordering::Acquire) {
             self.failure(
                 &account.id,
@@ -780,6 +835,9 @@ impl Engine {
         // makes Stop linearize either before launch or after durable ownership was recorded.
         let launched = {
             let mut state = self.0.state.lock().unwrap();
+            if retired_blocks_launch(&state.database, &account.id) {
+                return;
+            }
             let mut next = state.clone();
             let Ok(a) = account_mut(&mut next, &account.id) else {
                 return;
@@ -820,7 +878,7 @@ impl Engine {
         let mut tails: HashMap<(u32, String), crate::logs::Tail> = HashMap::new();
         let mut last_discovery = Instant::now() - Duration::from_secs(30);
         let mut last_log_discovery = Instant::now() - Duration::from_secs(30);
-        let mut close_attempts: HashMap<(u32, String), Instant> = HashMap::new();
+        let mut close_attempts = CloseAttempts::default();
         let mut exit_watches: HashMap<(u32, String), platform::ExitWatch> = HashMap::new();
         while !self.is_shutdown() {
             let retired = self
@@ -838,15 +896,29 @@ impl Engine {
                 let result = tokio::task::spawn_blocking(platform::players).await;
                 if let Ok(Ok(players)) = result {
                     for old in &retired {
-                        for player in players.iter().filter(|p| p.tracker == old.tracker) {
-                            let identity = player.identity(old.generation);
-                            let key = (identity.pid, identity.creation_time.clone());
-                            let started = *close_attempts.entry(key).or_insert_with(Instant::now);
-                            let _ = platform::close(
-                                &identity,
-                                started.elapsed() >= Duration::from_secs(5),
-                            );
+                        if let Some(identity) = &old.process
+                            && matches!(platform::alive(identity), Ok(false))
+                        {
+                            let _ = self.transaction(|s| {
+                                s.database.retired_launches.retain(|r| {
+                                    !(r.account_id == old.account_id
+                                        && r.generation == old.generation
+                                        && r.tracker == old.tracker
+                                        && r.process.as_ref() == Some(identity))
+                                });
+                                Ok(())
+                            });
+                            close_attempts.remove(identity);
+                            continue;
                         }
+                        let _ = self.close_retired(
+                            old,
+                            &players,
+                            Instant::now(),
+                            &mut close_attempts,
+                            platform::players,
+                            platform::close,
+                        );
                     }
                     for account in self.snapshot().accounts {
                         if account.process.is_some() || account.tracker.is_none() {
@@ -917,49 +989,13 @@ impl Engine {
                 {
                     exit_watches.insert(key.clone(), watch);
                 }
-                if !account.auto_recovery && account.last_error.as_deref() == Some(REJOIN_DISABLED)
-                {
-                    close_attempts.remove(&key);
-                }
                 match platform::alive(&identity) {
                     Ok(false) => {
                         let clean =
                             exit_watches.remove(&key).and_then(|w| w.clean_exit()) == Some(true);
                         tails.remove(&key);
-                        close_attempts.remove(&key);
-                        let _ = self.update(&account.id, account.generation, |a| {
-                            a.process = None;
-                            a.tracker = None;
-                            a.ownership_deadline = None;
-                            a.connected_since = None;
-                            a.disconnected_since = None;
-                            resume_after_confirmed_close(a);
-                            if a.desired_running
-                                && a.auto_recovery
-                                && !matches!(
-                                    a.status,
-                                    Status::NeedsAttention | Status::Queued | Status::Backoff
-                                )
-                            {
-                                apply_failure(
-                                    a,
-                                    &Failure::new(
-                                        FailureKind::Other,
-                                        "Managed client exited; scheduling recovery",
-                                    ),
-                                );
-                            } else if !a.desired_running || !a.auto_recovery {
-                                a.desired_running = false;
-                                a.status = Status::Stopped;
-                            }
-                            if clean && !account.disconnect_notified {
-                                a.last_error = Some("Client closed normally".into());
-                                a.recovery_reason = "NormalExit".into();
-                            }
-                        });
-                        if !account.desired_running {
-                            self.finish_operation(&account.id, account.generation, None);
-                        }
+                        close_attempts.remove(&identity);
+                        self.owned_exit_observed(&account, &identity, clean);
                         continue;
                     }
                     Err(_) => {
@@ -972,7 +1008,6 @@ impl Engine {
                 }
                 if account.desired_running
                     && account.status != Status::Queued
-                    && !close_attempts.contains_key(&key)
                     && !(account.recovery_reason == "TargetUnavailable"
                         && account.status == Status::Backoff)
                     && let Some(tail) = tails.get_mut(&key)
@@ -1012,38 +1047,18 @@ impl Engine {
                 }) else {
                     continue;
                 };
-                let recovering = recovery_due(&account, Utc::now());
-                let should_close = !account.desired_running
-                    || account.status == Status::Queued
-                    || recovering
-                    || close_attempts.contains_key(&key)
-                    || account.recovery_reason == "TargetUnavailable"
-                        && account.status == Status::Backoff;
-                if should_close {
-                    if recovering && !close_attempts.contains_key(&key) {
-                        self.failure(
-                            &account.id,
-                            account.generation,
-                            Failure::new(
-                                FailureKind::Other,
-                                "Disconnected for more than 30 seconds; scheduling recovery",
-                            ),
-                        );
-                    }
-                    let started = *close_attempts
-                        .entry(key.clone())
-                        .or_insert_with(Instant::now);
-                    let force = started.elapsed() >= Duration::from_secs(5);
-                    if let Err(e) = platform::close(&identity, force) {
-                        // Recheck the exact identity: it may have exited while close was in flight.
-                        if matches!(platform::alive(&identity), Ok(false)) {
-                            continue;
-                        }
-                        let _ = self.update(&account.id, account.generation, |a| {
-                            a.status = Status::NeedsAttention;
-                            a.last_error = Some(format!("{CLOSE_BLOCKED_PREFIX}{e}"));
-                        });
-                    }
+                // This boundary reads current intent under the command mutex and verifies
+                // the process again, including on every force escalation.
+                if self
+                    .close_owned(
+                        &account,
+                        Instant::now(),
+                        &mut close_attempts,
+                        platform::players,
+                        platform::close,
+                    )
+                    .unwrap_or(false)
+                {
                     continue;
                 }
                 if account
@@ -1067,6 +1082,12 @@ impl Engine {
                         a.disconnected_since = None;
                         a.last_error = None;
                         a.recovery_reason.clear();
+                        if a.close_intent
+                            .as_ref()
+                            .is_some_and(|i| i.reason.automatic())
+                        {
+                            a.close_intent = None;
+                        }
                     }
                 });
                 self.finish_operation(id, generation, None);
@@ -1147,6 +1168,7 @@ fn snapshot(s: &State) -> Snapshot {
     }
 }
 fn apply_failure(a: &mut Account, error: &Failure) {
+    a.close_intent = None;
     a.recovery_reason = format!("{:?}", error.kind);
     a.last_error = Some(error.message.clone());
     a.connected_since = None;
@@ -1193,12 +1215,45 @@ fn apply_failure(a: &mut Account, error: &Failure) {
                 + rand::random_range(0..=3);
         a.status = Status::Backoff;
         a.next_retry = Some(Utc::now() + ChronoDuration::seconds(delay as i64));
+        if error.kind == FailureKind::TargetUnavailable && a.process.is_some() {
+            a.close_intent = Some(CloseIntent {
+                id: Uuid::new_v4(),
+                reason: CloseReason::TargetReplacement,
+                generation: a.generation,
+                operation_id: a.operation_id,
+                denied: false,
+            });
+        }
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn explicit_stop_persists_close_intent_instead_of_inferring_it_from_state() {
+        let (engine, path) = fixture(1);
+        engine.command("1", "start").unwrap();
+        let a = engine.snapshot().accounts.remove(0);
+        engine
+            .update("1", a.generation, |a| {
+                a.tracker = Some("123456789012".into());
+            })
+            .unwrap();
+        engine.command("1", "stop").unwrap();
+        let db = Store::new(path.clone()).unwrap().load().unwrap();
+        let json = serde_json::to_value(&db).unwrap();
+        assert_eq!(
+            json["accounts"][0]["account"]["close_intent"]["reason"],
+            "UserStop"
+        );
+        assert_eq!(
+            json["retired_launches"][0]["close_intent"]["reason"],
+            "UserStop"
+        );
+        drop(engine);
+        std::fs::remove_dir_all(path).unwrap();
+    }
     #[test]
     fn bot_controls_reuse_saved_settings_without_starting_on_save() {
         let path = std::env::temp_dir().join(format!("rbx-bot-control-test-{}", Uuid::new_v4()));
