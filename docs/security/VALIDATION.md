@@ -52,3 +52,26 @@ The new workflow has no publishing/tagging path; packaging in existing CI is val
 
 Commercial readiness remains blocked by unresolved rights/provenance, license obligations, runtime/component coverage, open advisories and separate platform-policy/release deployment requirements.
 Owner approval is still needed for baseline remediation priorities, future severity/license gates, exceptions and separately configured required checks.
+
+## Exact changed files
+
+All 16 files are new; no existing application, dependency lock or PR01 file is modified.
+
+```text
+.github/workflows/security.yml
+docs/security/DEPENDENCY-INVENTORY.md
+docs/security/PROVENANCE-AND-LICENSE-REGISTER.md
+docs/security/SECRET-SCAN-REPORT.md
+docs/security/SECURITY-GATES.md
+docs/security/SUPPLY-CHAIN-THREAT-MODEL.md
+docs/security/VALIDATION.md
+docs/security/VULNERABILITY-BASELINE.md
+docs/security/dependency-inventory.json
+docs/security/vulnerability-baseline.json
+scripts/security-deny.toml
+scripts/security-gitleaks.toml
+scripts/security-inventory.py
+scripts/security-tools.py
+scripts/security.py
+scripts/test-security.py
+```
