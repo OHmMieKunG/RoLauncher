@@ -75,3 +75,28 @@ scripts/security-tools.py
 scripts/security.py
 scripts/test-security.py
 ```
+
+## Independent re-review remediation
+
+Reviewed head: `5c7e163bd9ca8e69d903d6cbae90813878b80605`; follow-up stays on PR #25.
+Only these four files change relative to that reviewed head:
+
+```text
+scripts/security.py
+scripts/test-security.py
+docs/security/SECURITY-GATES.md
+docs/security/VALIDATION.md
+```
+
+P2-01: empty graphs require the reviewed desktop test path, configuration fingerprint and exact empty `net8.0` lock; implicit configuration overrides invalidate the exception.
+Production, unreviewed, missing or malformed empty graphs are unverified; SDK/runtime packs remain outside that assessment.
+P2-02: timezone-aware RustSec timestamps must be within 30 days, with five minutes future tolerance; stale/invalid/future reports retain findings and return unverified.
+
+All original 14 scanner cases remain, with seven added regression cases covering both review findings.
+Tests include fixed-clock freshness boundaries, offsets, malformed/naive/future/stale times, retained advisories/warnings, production graphs, configuration changes and implicit imports.
+Security suites: 21 passed on both Windows and native Arch WSL, with all real scanners enabled and no skips.
+Windows Rust 111 plus explicit bootstrap 1, Linux Rust 108, desktop 74 per OS, full WinUI smoke, formatting, Clippy and existing governance regressions passed locally.
+Live RustSec assessment retained all ten baseline pairs with fresh revision `479c888ce4401313bca61ba4aba2d0f6244c4a09`; native Windows NuGet completed and the legitimate test project remained not-applicable.
+
+Red/green logs and final exact-head hosted source evidence are retained under ignored `target/pr02-rereview` and linked from the PR handoff.
+Original baseline/license/provenance evidence is unchanged; no suppression, accepted-risk exception, severity gate, dependency/version/lockfile, workflow, publisher or required-check-name change is introduced.

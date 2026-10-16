@@ -1,11 +1,16 @@
 """Behavioral tests for the read-only security CLI; all credentials are synthetic."""
 import json
+from contextlib import redirect_stdout
+from datetime import datetime, timezone
+import io
 import os
 from pathlib import Path
 import subprocess
 import sys
 import tempfile
 import unittest
+from unittest.mock import patch
+from security import evaluate, main
 
 SCRIPT = Path(__file__).with_name("security.py")
 
@@ -15,10 +20,74 @@ class SecurityTests(unittest.TestCase):
         return subprocess.run([sys.executable, str(SCRIPT), *map(str, args)],
                               capture_output=True, text=True)
 
+    def test_stale_rustsec_data_is_unverified_without_hiding_findings(self):
+        now = datetime(2026, 10, 16, 12, tzinfo=timezone.utc)
+        report = {"database": {"last-commit": "a" * 40, "advisory-count": 1,
+                    "last-updated": "2026-09-15T12:00:00Z"},
+                  "vulnerabilities": {"found": True, "count": 1, "list": [{
+                    "advisory": {"id": "RUSTSEC-2099-0001"},
+                    "package": {"name": "synthetic-package", "version": "1.0.0"}}]}, "warnings": {}}
+        result = evaluate("rust", report, 1, now=now)
+        self.assertEqual(result["status"], "unverified")
+        self.assertEqual(result["findings"][0]["advisory"]["id"], "RUSTSEC-2099-0001")
+        self.assertEqual(result["freshness"]["status"], "stale")
+
+    def test_rustsec_freshness_uses_aware_time_and_explicit_age_boundaries(self):
+        now = datetime(2026, 10, 16, 12, tzinfo=timezone.utc)
+        cases = [
+            ("2026-10-16T12:00:00Z", "clean", "fresh"),
+            ("2026-10-16T19:00:00+07:00", "clean", "fresh"),
+            ("2026-09-16T12:00:00Z", "clean", "fresh"),
+            ("2026-09-16T11:59:59Z", "unverified", "stale"),
+            ("2026-10-16T12:05:00Z", "clean", "fresh"),
+            ("2026-10-16T12:05:01Z", "unverified", "future"),
+            ("2099-01-01T00:00:00Z", "unverified", "future"),
+            ("2026-10-16T12:00:00", "unverified", "invalid"),
+            ("2026-10-16", "unverified", "invalid"),
+            ("not-a-date", "unverified", "invalid"),
+            ("2026-99-99T00:00:00Z", "unverified", "invalid"),
+            (None, "unverified", "invalid"),
+        ]
+        for timestamp, status, freshness in cases:
+            with self.subTest(timestamp=timestamp):
+                report = {"database": {"last-commit": "a" * 40, "advisory-count": 1, "last-updated": timestamp},
+                          "vulnerabilities": {"found": False, "count": 0, "list": []}, "warnings": {}}
+                result = evaluate("rust", report, 0, now=now)
+                self.assertEqual(result["status"], status)
+                self.assertEqual(result["freshness"]["status"], freshness)
+                self.assertEqual(result["freshness"]["assessed_at"], "2026-10-16T12:00:00+00:00")
+
+    def test_invalid_and_future_timestamps_retain_advisories_and_informational_warnings(self):
+        now = datetime(2026, 10, 16, 12, tzinfo=timezone.utc)
+        advisory = {"advisory": {"id": "RUSTSEC-2099-0001"},
+                    "package": {"name": "synthetic-package", "version": "1.0.0"}}
+        for timestamp in ("not-a-date", "2099-01-01T00:00:00Z"):
+            report = {"database": {"last-commit": "a" * 40, "advisory-count": 1, "last-updated": timestamp},
+                      "vulnerabilities": {"found": True, "count": 1, "list": [advisory]},
+                      "warnings": {"unmaintained": [advisory]}}
+            result = evaluate("rust", report, 1, now=now)
+            self.assertEqual(result["status"], "unverified")
+            self.assertEqual(result["findings"][0]["advisory"]["id"], "RUSTSEC-2099-0001")
+            self.assertEqual(result["warnings"]["unmaintained"][0]["advisory"]["id"], "RUSTSEC-2099-0001")
+
+    def test_stale_rustsec_cli_exits_unverified_and_preserves_findings(self):
+        with tempfile.TemporaryDirectory() as directory:
+            report = Path(directory) / "audit.json"
+            report.write_text(json.dumps({"database": {"last-commit": "a" * 40, "advisory-count": 1,
+                "last-updated": "1900-01-01T00:00:00Z"}, "warnings": {}, "vulnerabilities": {
+                "found": True, "count": 1, "list": [{"advisory": {"id": "RUSTSEC-2099-0001"},
+                    "package": {"name": "synthetic-package", "version": "1.0.0"}}]}}))
+            result = self.cli("evaluate", "--kind", "rust", "--report", report, "--exit-code", 1)
+            self.assertEqual(result.returncode, 2)
+            data = json.loads(result.stdout)
+            self.assertEqual(data["status"], "unverified")
+            self.assertEqual(data["freshness"]["status"], "stale")
+            self.assertEqual(data["findings"][0]["advisory"]["id"], "RUSTSEC-2099-0001")
+
     def test_clean_audit_report_is_explicit(self):
         with tempfile.TemporaryDirectory() as directory:
             report = Path(directory) / "audit.json"
-            report.write_text(json.dumps({"database": {"last-commit": "a" * 40, "advisory-count": 1, "last-updated": "2026-10-14T00:00:00Z"},
+            report.write_text(json.dumps({"database": {"last-commit": "a" * 40, "advisory-count": 1, "last-updated": datetime.now(timezone.utc).isoformat()},
                                          "vulnerabilities": {"found": False, "count": 0, "list": []},
                                          "warnings": {}}))
             result = self.cli("evaluate", "--kind", "rust", "--report", report, "--exit-code", 0)
@@ -28,7 +97,7 @@ class SecurityTests(unittest.TestCase):
     def test_advisories_are_visible_baseline_not_an_unapproved_merge_gate(self):
         with tempfile.TemporaryDirectory() as directory:
             report = Path(directory) / "audit.json"
-            report.write_text(json.dumps({"database": {"last-commit": "a" * 40, "advisory-count": 1, "last-updated": "2026-10-14T00:00:00Z"},
+            report.write_text(json.dumps({"database": {"last-commit": "a" * 40, "advisory-count": 1, "last-updated": datetime.now(timezone.utc).isoformat()},
                 "vulnerabilities": {"found": True, "count": 1, "list": [{
                     "advisory": {"id": "RUSTSEC-2099-0001", "cvss": "CVSS:3.1/AV:N"},
                     "package": {"name": "synthetic-package", "version": "1.0.0"},
@@ -133,12 +202,87 @@ class SecurityTests(unittest.TestCase):
     def test_empty_nuget_test_lock_is_not_a_clean_runtime_audit(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
-            (root / "fixture.csproj").write_text('<Project Sdk="Microsoft.NET.Sdk"/>')
-            (root / "packages.lock.json").write_text(json.dumps({"version": 1, "dependencies": {"net8.0": {}}}))
-            result = self.cli("audit", "--kind", "nuget", "--root", root, "--project", "fixture.csproj",
+            project = root / "desktop.tests/RoLauncher.Desktop.Tests.csproj"
+            project.parent.mkdir()
+            project.write_bytes(SCRIPT.parent.parent.joinpath("desktop.tests/RoLauncher.Desktop.Tests.csproj").read_bytes())
+            project.with_name("packages.lock.json").write_text(json.dumps({"version": 1, "dependencies": {"net8.0": {}}}))
+            result = self.cli("audit", "--kind", "nuget", "--root", root, "--project", "desktop.tests/RoLauncher.Desktop.Tests.csproj",
                               "--tool", "intentionally-absent")
             self.assertEqual(result.returncode, 0)
             self.assertEqual(json.loads(result.stdout)["status"], "not-applicable")
+            self.assertIn("SDK/runtime packs are not audited", json.loads(result.stdout)["reason"])
+
+    def test_unreviewed_empty_nuget_graphs_are_unverified(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            for name in ("desktop/RoLauncher.Desktop.csproj", "desktop.linux/RoLauncher.Linux.csproj", "other.csproj"):
+                with self.subTest(project=name):
+                    project = root / name
+                    project.parent.mkdir(parents=True, exist_ok=True)
+                    project.write_text('<Project Sdk="Microsoft.NET.Sdk"/>')
+                    project.with_name("packages.lock.json").write_text(json.dumps({"version": 1, "dependencies": {"net8.0": {}}}))
+                    result = self.cli("audit", "--kind", "nuget", "--root", root, "--project", name,
+                                      "--tool", "intentionally-absent")
+                    self.assertEqual(result.returncode, 2, result.stdout + result.stderr)
+                    self.assertEqual(json.loads(result.stdout)["status"], "unverified")
+
+    def test_empty_or_incomplete_production_locks_cannot_use_a_clean_native_report(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            project = root / "desktop/RoLauncher.Desktop.csproj"
+            project.parent.mkdir()
+            project.write_text('<Project Sdk="Microsoft.NET.Sdk"/>')
+            native = json.dumps({"version": 1, "sources": ["https://api.nuget.org/v3/index.json"],
+                                 "projects": [{"path": str(project)}]}).encode()
+            for lock in ({"version": 1, "dependencies": {"net8.0": {}}},
+                         {"version": 1, "dependencies": {}}, {"version": 1},
+                         {"version": 1, "dependencies": {"net8.0": None}},
+                         {"version": 1, "dependencies": []}):
+                with self.subTest(lock=lock):
+                    project.with_name("packages.lock.json").write_text(json.dumps(lock))
+                    output = io.StringIO()
+                    with patch.object(sys, "argv", [str(SCRIPT), "audit", "--kind", "nuget", "--root", str(root),
+                                    "--project", "desktop/RoLauncher.Desktop.csproj"]), \
+                         patch("security.subprocess.run", return_value=subprocess.CompletedProcess([], 0, native, b"")), \
+                         redirect_stdout(output):
+                        code = main()
+                    self.assertEqual(code, 2)
+                    self.assertEqual(json.loads(output.getvalue())["status"], "unverified")
+
+    def test_zero_package_exception_rejects_changed_configuration_and_implicit_imports(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            project = root / "desktop.tests/RoLauncher.Desktop.Tests.csproj"
+            project.parent.mkdir()
+            reviewed = SCRIPT.parent.parent.joinpath("desktop.tests/RoLauncher.Desktop.Tests.csproj").read_bytes()
+            lock = project.with_name("packages.lock.json")
+            lock.write_text(json.dumps({"version": 1, "dependencies": {"net8.0": {}}}))
+            for location in (root, project.parent):
+                for name in ("Directory.Build.props", "Directory.Build.targets", "Directory.Packages.props", "global.json"):
+                    with self.subTest(location=location.name, configuration=name):
+                        project.write_bytes(reviewed)
+                        extra = location / name
+                        extra.write_text('<Project><ItemGroup><PackageReference Include="Synthetic.Package" Version="1.0.0"/></ItemGroup></Project>')
+                        result = self.cli("audit", "--kind", "nuget", "--root", root,
+                            "--project", "desktop.tests/RoLauncher.Desktop.Tests.csproj", "--tool", "intentionally-absent")
+                        self.assertEqual(result.returncode, 2, result.stdout + result.stderr)
+                        extra.unlink()
+            for content in (reviewed.replace(b"</Project>", b'<ItemGroup><PackageReference Include="Synthetic.Package" Version="1.0.0"/></ItemGroup></Project>'),
+                            reviewed.replace(b"</Project>", b'<Import Project="extra.props"/></Project>'),
+                            reviewed.replace(b"net8.0", b"net10.0"), b"malformed XML"):
+                with self.subTest(configuration=content[-50:]):
+                    project.write_bytes(content)
+                    result = self.cli("audit", "--kind", "nuget", "--root", root,
+                        "--project", "desktop.tests/RoLauncher.Desktop.Tests.csproj", "--tool", "intentionally-absent")
+                    self.assertEqual(result.returncode, 2)
+            project.write_bytes(reviewed.replace(b"\n", b"\r\n"))
+            result = self.cli("audit", "--kind", "nuget", "--root", root,
+                "--project", "desktop.tests/RoLauncher.Desktop.Tests.csproj", "--tool", "intentionally-absent")
+            self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+            lock.write_text(json.dumps({"version": 1, "dependencies": {"net10.0": {}}}))
+            result = self.cli("audit", "--kind", "nuget", "--root", root,
+                "--project", "desktop.tests/RoLauncher.Desktop.Tests.csproj", "--tool", "intentionally-absent")
+            self.assertEqual(result.returncode, 2)
 
     def test_workflow_uses_untrusted_pr_boundary_without_writes_secrets_or_artifacts(self):
         # JSON is valid YAML; stdlib parsing keeps the trust contract test dependency-free.

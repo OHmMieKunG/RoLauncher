@@ -9,15 +9,39 @@ Workflow JSON is valid YAML, allowing dependency-free trust-boundary tests with 
 | Result | CLI exit | CI treatment |
 |---|---|---|
 | New high-confidence secret pattern | 1 | Fail; no exemption or baseline suppression exists |
-| Tool absent, timeout, corrupt/missing report, advisory fetch failure, filtered Rust audit | 2 | Fail as unverified, independently from a confirmed finding |
+| Tool absent, timeout, corrupt/missing report, advisory fetch failure, filtered Rust audit, invalid/stale/future database time | 2 | Fail as unverified, independently from a confirmed finding |
 | Completed Rust/NuGet vulnerability audit with findings | 0 | Visible baseline evidence; no unapproved permanent severity gate |
 | Completed Rust license/source audit with missing/disallowed license | 0 | Visible finding; legal/license disposition remains required |
 | Completed audit without known findings | 0 | Clean only within tool/feed/scope limits |
-| Empty test NuGet lock | 0 | Not-applicable; explicitly does not audit framework/runtime packs |
+| Reviewed empty desktop test NuGet lock/configuration | 0 | Not-applicable; explicitly does not audit framework/runtime packs |
 
 No detector match proves that a credential is active; blocking prevents publication of plausible new credentials while the owner investigates privately.
 Current tracked source/history have no detector matches, so no pre-existing secret allowlist was needed.
 Unavailable scans must be rerun or explicitly handled through a separately reviewed owner decision, not relabeled clean.
+
+## Reviewed zero-package project
+
+Only `desktop.tests/RoLauncher.Desktop.Tests.csproj` may return not-applicable for an empty graph.
+Its reviewed `Microsoft.NET.Sdk`/`net8.0` configuration contains no PackageReference or custom imports; LF-normalized SHA256 is `26eb8bcbca31356d9436a2c4afb31a3a4929b56b9a9806d79a4b83d8d828c19d`.
+The lock must be exactly schema 1 with one empty `net8.0` group.
+
+Changed project contents, additional/different frameworks, or ancestor `Directory.Build.props/targets/rsp`, `Directory.Packages.props/targets`, `MSBuild.rsp` or `global.json` controls invalidate this exception.
+Missing/malformed lock graphs and unexpected empty Windows/Linux production graphs are unverified, even if the native tool would report clean.
+This narrow declaration/lock assessment assumes the existing trusted SDK environment; it does not audit SDK/runtime packs or certify all MSBuild behavior.
+
+## RustSec freshness assessment
+
+The database's `last-updated` must parse as a timezone-aware ISO timestamp and be at most **30 days** old.
+Up to **five minutes** ahead of the UTC assessment clock is tolerated for clock skew; anything farther ahead is unverified.
+Exactly 30 days and exactly five minutes are inclusive boundaries.
+
+Each evaluated report records assessment time, age, maximum age, future tolerance and fresh/stale/future/invalid status.
+Stale, malformed, timezone-less or implausibly future evidence returns unverified/exit 2 while retaining parsed advisories and informational warnings.
+Fresh reports with advisories still return the existing baseline-only exit 0; this is a data-quality gate, not a vulnerability-severity merge gate.
+
+Thirty days tolerates quiet advisory periods while refusing indefinitely old evidence; five minutes limits ordinary clock skew without trusting future-dated commits.
+The normal audit command still fetches through cargo-audit; commit age is a bounded freshness proxy, not proof of complete/latest advisory coverage.
+CI trusts its UTC clock; there is no CLI date override or stale-data bypass, and changing this window requires reviewed policy changes.
 
 ## Proposed policy requiring owner approval
 

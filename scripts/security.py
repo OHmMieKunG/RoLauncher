@@ -1,6 +1,7 @@
 """Read-only security evidence. Exit 1: secret finding; exit 2: unverified scan."""
 import argparse
-from datetime import datetime
+from datetime import datetime, timedelta, timezone
+import hashlib
 import json
 from pathlib import Path
 import re
@@ -9,6 +10,12 @@ import subprocess
 import tempfile
 
 ROOT = Path(__file__).resolve().parent.parent
+# Reviewed Microsoft.NET.Sdk/net8.0 project with no PackageReference or custom imports.
+# Configuration changes require review, not an automatic extension of this exception.
+ZERO_PACKAGE_PROJECT = "desktop.tests/RoLauncher.Desktop.Tests.csproj"
+ZERO_PACKAGE_PROJECT_SHA256 = "26eb8bcbca31356d9436a2c4afb31a3a4929b56b9a9806d79a4b83d8d828c19d"
+ADVISORY_MAX_AGE = timedelta(days=30)
+ADVISORY_FUTURE_TOLERANCE = timedelta(minutes=5)
 
 
 def run(command, **kwargs):
@@ -74,7 +81,20 @@ def audit(args):
     if args.kind == "nuget":
         project = (args.root / args.project).resolve(strict=True)
         lock = json.loads(project.with_name("packages.lock.json").read_text())
-        if lock.get("version") == 1 and lock.get("dependencies") and all(not p for p in lock["dependencies"].values()):
+        dependencies = lock.get("dependencies")
+        if (lock.get("version") != 1 or not isinstance(dependencies, dict) or not dependencies
+                or not all(isinstance(packages, dict) for packages in dependencies.values())):
+            raise ValueError("Incomplete NuGet graph")
+        if all(not packages for packages in dependencies.values()):
+            if (project.relative_to(args.root.resolve()).as_posix() != ZERO_PACKAGE_PROJECT
+                    or hashlib.sha256(project.read_bytes().replace(b"\r\n", b"\n")).hexdigest() != ZERO_PACKAGE_PROJECT_SHA256
+                    or lock != {"version": 1, "dependencies": {"net8.0": {}}}):
+                raise ValueError("Unreviewed empty NuGet graph")
+            for directory in (project.parent, *project.parent.parents):
+                if any((directory / name).exists() or (directory / name).is_symlink() for name in (
+                        "Directory.Build.props", "Directory.Build.targets", "Directory.Packages.props",
+                        "Directory.Packages.targets", "Directory.Build.rsp", "MSBuild.rsp", "global.json")):
+                    raise ValueError("Unreviewed implicit project configuration")
             return {"status": "not-applicable", "findings": [],
                     "reason": "Zero locked NuGet packages; SDK/runtime packs are not audited by this result"}
         command = [args.tool or "dotnet", "list", project, "package", "--vulnerable",
@@ -101,7 +121,7 @@ def audit(args):
                           "message": item["fields"].get("message")} for item in findings]}
 
 
-def evaluate(kind, report, code):
+def evaluate(kind, report, code, *, now=None):
     if kind == "nuget":
         if (code != 0 or report.get("version") != 1 or not report.get("sources")
                 or not report.get("projects") or report.get("problems")):
@@ -137,7 +157,6 @@ def evaluate(kind, report, code):
         if (code not in (0, 1) or not re.fullmatch(r"[a-f0-9]{40}", database.get("last-commit", ""))
                 or not isinstance(database.get("advisory-count"), int) or database["advisory-count"] < 1):
             return {"status": "unverified", "findings": []}
-        datetime.fromisoformat(database["last-updated"])
         settings = report.get("settings", {})
         if settings.get("ignore") or settings.get("severity") or settings.get("target_arch") or settings.get("target_os"):
             raise ValueError("Filtered advisory evidence")
@@ -150,9 +169,27 @@ def evaluate(kind, report, code):
                     ("id", "title", "url", "date", "aliases", "cvss", "informational")},
                     "package": {key: item["package"][key] for key in ("name", "version")},
                     "versions": item.get("versions"), "affected": item.get("affected")}
-        return {"status": "findings" if findings or report.get("warnings") else "clean",
+        result = {"status": "findings" if findings or report.get("warnings") else "clean",
                 "database": report["database"], "findings": [advisory(item) for item in findings],
                 "warnings": {key: [advisory(item) for item in items] for key, items in report.get("warnings", {}).items()}}
+        assessed_at = now if now is not None else datetime.now(timezone.utc)
+        freshness = {"status": "invalid", "assessed_at": assessed_at.isoformat(),
+                     "max_age_seconds": int(ADVISORY_MAX_AGE.total_seconds()),
+                     "future_tolerance_seconds": int(ADVISORY_FUTURE_TOLERANCE.total_seconds())}
+        try:
+            updated = datetime.fromisoformat(database["last-updated"])
+            if updated.utcoffset() is None or assessed_at.utcoffset() is None:
+                raise ValueError("Timezone required")
+            age = assessed_at - updated
+            freshness["age_seconds"] = age.total_seconds()
+            freshness["status"] = ("stale" if age > ADVISORY_MAX_AGE else
+                                   "future" if age < -ADVISORY_FUTURE_TOLERANCE else "fresh")
+        except (KeyError, TypeError, ValueError, OverflowError):
+            pass
+        result["freshness"] = freshness
+        if freshness["status"] != "fresh":
+            result["status"] = "unverified"
+        return result
     raise ValueError("Unknown report kind")
 
 
