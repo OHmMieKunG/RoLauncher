@@ -22,7 +22,7 @@ No new machine keys, key ACL changes, accounts, services, installer changes or p
 | Windows lab validation tests | 12 passed: two existing guards and ten deterministic review regressions; no key creation |
 | Receipt/source tests | 5 passed; receipt corruption, ambiguous deletion status, exclusive baselines, hash changes and source isolation |
 | Application Rust regression | 111 passed; existing UI bootstrap test remains ignored locally |
-| Desktop regression | 74 existing model/editor/update checks passed; no installer or UI smoke execution locally |
+| Desktop regression | 74 existing model/editor/update checks passed; isolated installer fixture also passed locally during the review correction |
 | Governance regression | 30 promotion tests and existing versioning fixtures passed; version remains 1.7.0 |
 | Native P/A/B provisioning, management rights, reboot | **Pending human lab execution**, including failure/unsupported outcomes |
 | Windows/Linux hosted checks | Exact-source runs linked below; conclusions belong to those runs and the Draft PR, not the manual lab matrix |
@@ -195,6 +195,7 @@ In a genuine B interactive session:
 Require `designated_user_b_live_token=true` and a standard account; inspect independent M/U native open and sign outcomes.
 Require `original_user_evidence=matched_protected_independent_reference` before attributing U operations to A's enrolled key.
 If the reference is missing, torn, unprotected, stale or mismatched, the result is `unverified` and U's native probe is not attempted.
+
 `lab-check` must fail authorization; successful `lab-observe` means observations were collected, not that isolation passed.
 Missing/unreadable user-store keys and unsupported operations remain their actual outcomes; no simulated SID test establishes ACL enforcement.
 
@@ -225,6 +226,7 @@ No automatic fault injection, real-profile modification or privileged remediatio
 These commands verify PoC namespace, provider, scope, live owner, exact public key, current ACL and immutable receipt history before deletion.
 Machine recovery additionally requires the complete protected fixed machine registration, matching lab UUID/configuration and exact reserved/committed key identity.
 Foreign-lab receipts and incomplete/torn registration are rejected before opening a key or accepting a prior cleanup result; partial receipts remain untouched.
+
 Missing public evidence, changed owner/ACL, denied access, torn receipts and ambiguous keysets retain incomplete accounting.
 Old owner/SYSTEM-only machine receipts are not automatically adopted into the new ACL model; their cleanup remains separately authorized.
 
