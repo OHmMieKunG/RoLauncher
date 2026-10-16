@@ -25,7 +25,7 @@ No new machine keys, key ACL changes, accounts, services, installer changes or p
 | Desktop regression | 74 existing model/editor/update checks passed; no installer or UI smoke execution locally |
 | Governance regression | 30 promotion tests and existing versioning fixtures passed; version remains 1.7.0 |
 | Native P/A/B provisioning, management rights, reboot | **Pending human lab execution**, including failure/unsupported outcomes |
-| Windows/Linux hosted checks | Pending links/results below; CI cannot establish P/A/B isolation or reboot continuity |
+| Windows/Linux hosted checks | Exact-source runs linked below; conclusions belong to those runs and the Draft PR, not the manual lab matrix |
 
 Sandbox fixture permissions initially prevented unrelated application/governance tests; rerunning those synthetic suites outside the sandbox passed.
 Existing native PoC key tests are deliberately deferred to clean hosted Windows execution rather than reusing the blocked developer host.
@@ -254,7 +254,15 @@ Legacy machine create/recovery commands reject the unguarded path; no required c
 
 Elevated hosted runners remain diagnostic only; green CI never establishes A/B separation, reboot, effective machine ACLs or customer authorization.
 Only the existing sanitized `measurements.json` artifact is uploadable; no additional local ledger/state artifact is published.
-Windows/Linux CI run links and conclusions will be recorded here once available.
+Hosted execution for implementation commit `fc1cb5c70fe3841e0c6cfe5af0126229b38d68af`:
+
+- [Windows identity feasibility, including all original 20 PoC tests](https://github.com/oangsa/RoLauncher/actions/runs/38904809974).
+- [Windows checks and Ubuntu application/package checks](https://github.com/oangsa/RoLauncher/actions/runs/38904809866).
+- [Ubuntu and Arch container checks](https://github.com/oangsa/RoLauncher/actions/runs/38904809856).
+- [Security inventory and evidence checks](https://github.com/oangsa/RoLauncher/actions/runs/38904809964).
+
+These runs were queued when linked; consult their actual conclusions and [Draft PR #27](https://github.com/oangsa/RoLauncher/pull/27) for subsequent status.
+Later documentation-only commits do not convert those runs into native lab evidence.
 
 ## Proposed Owner Decisions and blockers
 
