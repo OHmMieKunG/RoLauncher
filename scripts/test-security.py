@@ -18,7 +18,7 @@ class SecurityTests(unittest.TestCase):
     def test_clean_audit_report_is_explicit(self):
         with tempfile.TemporaryDirectory() as directory:
             report = Path(directory) / "audit.json"
-            report.write_text(json.dumps({"database": {"last-commit": "a" * 40},
+            report.write_text(json.dumps({"database": {"last-commit": "a" * 40, "advisory-count": 1, "last-updated": "2026-10-14T00:00:00Z"},
                                          "vulnerabilities": {"found": False, "count": 0, "list": []},
                                          "warnings": {}}))
             result = self.cli("evaluate", "--kind", "rust", "--report", report, "--exit-code", 0)
@@ -28,7 +28,7 @@ class SecurityTests(unittest.TestCase):
     def test_advisories_are_visible_baseline_not_an_unapproved_merge_gate(self):
         with tempfile.TemporaryDirectory() as directory:
             report = Path(directory) / "audit.json"
-            report.write_text(json.dumps({"database": {"last-commit": "a" * 40},
+            report.write_text(json.dumps({"database": {"last-commit": "a" * 40, "advisory-count": 1, "last-updated": "2026-10-14T00:00:00Z"},
                 "vulnerabilities": {"found": True, "count": 1, "list": [{
                     "advisory": {"id": "RUSTSEC-2099-0001", "cvss": "CVSS:3.1/AV:N"},
                     "package": {"name": "synthetic-package", "version": "1.0.0"},
@@ -50,6 +50,18 @@ class SecurityTests(unittest.TestCase):
                     result = self.cli("evaluate", "--kind", "rust", "--report", report, "--exit-code", code)
                     self.assertEqual(result.returncode, 2)
                     self.assertEqual(json.loads(result.stdout)["status"], "unverified")
+
+    def test_empty_or_malformed_advisory_database_is_not_clean(self):
+        with tempfile.TemporaryDirectory() as directory:
+            report = Path(directory) / "audit.json"
+            for database in ({"last-commit": "a" * 40, "advisory-count": 0, "last-updated": "2026-10-14T00:00:00Z"},
+                             {"last-commit": "invalid", "advisory-count": 1, "last-updated": "2026-10-14T00:00:00Z"},
+                             {"last-commit": "a" * 40}):
+                report.write_text(json.dumps({"database": database, "warnings": {},
+                    "vulnerabilities": {"count": 0, "found": False, "list": []}}))
+                result = self.cli("evaluate", "--kind", "rust", "--report", report, "--exit-code", 0)
+                self.assertEqual(result.returncode, 2)
+                self.assertEqual(json.loads(result.stdout)["status"], "unverified")
 
     def test_secret_tool_report_is_allowlisted_and_errors_never_echo_raw_output(self):
         with tempfile.TemporaryDirectory() as directory:

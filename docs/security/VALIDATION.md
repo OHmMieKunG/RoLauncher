@@ -8,12 +8,12 @@ This report distinguishes local executions from hosted CI; no merge or release i
 | Check | Evidence/result |
 |---|---|
 | TDD CLI/policy seams | User approved scanner CLI, audit decisions and workflow trust boundary; red/green cycles captured under ignored `target/pr02/tdd-red-*.log` |
-| Security suite | 13 tests pass on both Windows and native Arch WSL with all three real pinned scanners; no cases skipped |
+| Security suite | 14 tests pass on Windows with all three real pinned scanners; native Linux runs the same suite with all tools enabled |
 | Clean source/history | No Gitleaks matches in initial tracked tree, staged PR02 files or 62 available historical commits |
 | Synthetic clean/false positives | Harmless environment references and documentation URL remain clean |
 | Synthetic credential detection | PAT, Roblox cookie and authenticated launch URI detected; complete values absent from CLI output; removed-in-range secret still detected |
 | Lockfile vulnerabilities | Real RustSec scan reports 10 pairs; synthetic advisory fixture retains ID and patched range without inventing merge authority |
-| Advisory unavailable | Actual cargo-audit fixture with unreachable local DB source returns unverified; missing/corrupt report cases do likewise |
+| Advisory unavailable | Actual cargo-audit fixture with unreachable local DB source returns unverified; empty/incomplete DB and malformed revision/date evidence do likewise |
 | License policy | Actual cargo-deny fixtures distinguish MIT, missing license and GPL-2.0-only outside reviewed allowlist |
 | Scanner/process errors | Absent executable, bad process output and tampered tool archive return unverified; tampered executable is not extracted/executed |
 | Untrusted PR safety | Parsed workflow test checks PR events, read-only permissions, immutable Action pins, nonpersisted credentials and no custom secrets/artifact upload |

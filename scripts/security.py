@@ -1,5 +1,6 @@
 """Read-only security evidence. Exit 1: secret finding; exit 2: unverified scan."""
 import argparse
+from datetime import datetime
 import json
 from pathlib import Path
 import re
@@ -132,8 +133,11 @@ def evaluate(kind, report, code):
             findings.append({"rule": rule, "path": path, "line": line, "commit": commit})
         return {"status": "findings" if findings else "clean", "findings": findings}
     if kind == "rust":
-        if code not in (0, 1) or not report.get("database", {}).get("last-commit"):
+        database = report.get("database", {})
+        if (code not in (0, 1) or not re.fullmatch(r"[a-f0-9]{40}", database.get("last-commit", ""))
+                or not isinstance(database.get("advisory-count"), int) or database["advisory-count"] < 1):
             return {"status": "unverified", "findings": []}
+        datetime.fromisoformat(database["last-updated"])
         settings = report.get("settings", {})
         if settings.get("ignore") or settings.get("severity") or settings.get("target_arch") or settings.get("target_os"):
             raise ValueError("Filtered advisory evidence")
