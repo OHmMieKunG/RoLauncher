@@ -8,6 +8,9 @@ use windows_sys::Win32::{
     System::{Registry::*, Threading::*},
 };
 
+#[path = "recovery.rs"]
+pub mod recovery;
+
 fn wide(value: &str) -> Vec<u16> {
     value.encode_utf16().chain(Some(0)).collect()
 }
@@ -62,6 +65,7 @@ impl Drop for LocalAllocation {
     }
 }
 
+#[derive(Clone)]
 pub struct Identity {
     pub sid_reference: [u8; 32],
     pub thread_token: bool,
@@ -69,7 +73,47 @@ pub struct Identity {
     pub restricted: bool,
     pub session_zero: bool,
     pub service: bool,
+    pub logon: LogonContext,
     sid: String,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum LogonContext {
+    Interactive,
+    Batch,
+    Service,
+    Network,
+    Unknown,
+}
+#[derive(Clone, Copy, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ContextPurpose {
+    Enrollment,
+    Diagnostic,
+}
+
+impl Identity {
+    pub fn accept(&self, purpose: ContextPurpose) -> Result<(), String> {
+        if self.thread_token || self.service || self.restricted {
+            return Err("unsupported effective security token".into());
+        }
+        match self.logon {
+            LogonContext::Unknown | LogonContext::Network => {
+                return Err("unsupported noninteractive logon context".into());
+            }
+            LogonContext::Service if !self.session_zero => {
+                return Err("unexpected service logon outside session zero".into());
+            }
+            _ => (),
+        }
+        if purpose == ContextPurpose::Enrollment
+            && (self.elevated || self.session_zero || self.logon != LogonContext::Interactive)
+        {
+            return Err("enrollment requires an ordinary unelevated interactive user; use explicit diagnostics for capability measurements".into());
+        }
+        Ok(())
+    }
 }
 
 pub fn effective_identity() -> Result<Identity, String> {
@@ -163,6 +207,59 @@ pub fn effective_identity() -> Result<Identity, String> {
         restricted: unsafe { IsTokenRestricted(token.0) } != 0,
         session_zero: session == 0,
         service,
+        logon: token_logon(token.0)?,
+    })
+}
+
+fn token_logon(token: HANDLE) -> Result<LogonContext, String> {
+    let mut size = 0;
+    unsafe {
+        GetTokenInformation(token, TokenGroups, null_mut(), 0, &mut size);
+    }
+    if unsafe { GetLastError() } != ERROR_INSUFFICIENT_BUFFER || !(16..=65536).contains(&size) {
+        return Err("cannot measure token logon groups".into());
+    }
+    let mut buffer = vec![0usize; (size as usize).div_ceil(size_of::<usize>())];
+    if unsafe {
+        GetTokenInformation(
+            token,
+            TokenGroups,
+            buffer.as_mut_ptr().cast(),
+            size,
+            &mut size,
+        )
+    } == 0
+    {
+        return Err("cannot read token logon groups".into());
+    }
+    let groups = unsafe { &*buffer.as_ptr().cast::<TOKEN_GROUPS>() };
+    let offset = std::mem::offset_of!(TOKEN_GROUPS, Groups);
+    if offset + groups.GroupCount as usize * size_of::<SID_AND_ATTRIBUTES>() > size as usize {
+        return Err("invalid token logon groups".into());
+    }
+    let entries =
+        unsafe { std::slice::from_raw_parts(groups.Groups.as_ptr(), groups.GroupCount as usize) };
+    // Winnt.h SE_GROUP_ENABLED (0x4), SE_GROUP_USE_FOR_DENY_ONLY (0x10).
+    let has = |kind| {
+        entries.iter().any(|group| {
+            group.Attributes & 0x00000004 != 0
+                && group.Attributes & 0x00000010 == 0
+                && unsafe { IsWellKnownSid(group.Sid, kind) } != 0
+        })
+    };
+    if !has(WinAuthenticatedUserSid) {
+        return Ok(LogonContext::Unknown);
+    }
+    Ok(if has(WinNetworkSid) {
+        LogonContext::Network
+    } else if has(WinServiceSid) {
+        LogonContext::Service
+    } else if has(WinBatchSid) {
+        LogonContext::Batch
+    } else if has(WinInteractiveSid) {
+        LogonContext::Interactive
+    } else {
+        LogonContext::Unknown
     })
 }
 
@@ -276,29 +373,19 @@ pub struct Key {
     pub kind: Provider,
     pub scope: Scope,
     delete_on_drop: bool,
-    finalized: bool,
+    finalize_attempted: bool,
+    recovery: Option<recovery::Receipt>,
     initial_acl_error: Option<String>,
 }
 impl Drop for Key {
     fn drop(&mut self) {
-        if self.delete_on_drop && self.handle.0 != 0 {
-            match cng("cleanup PoC key", unsafe {
-                NCryptDeleteKey(
-                    self.handle.0,
-                    if self.kind == Provider::Tpm {
-                        0
-                    } else {
-                        NCRYPT_SILENT_FLAG
-                    },
-                )
-            }) {
-                Ok(()) => self.handle.0 = 0,
-                Err(error)
-                    if !self.finalized
-                        && (error.contains("absent_or_unreadable_keyset")
-                            || error.contains(": not_found (")) => {}
-                Err(error) => eprintln!("{error}; PoC cleanup requires retry"),
+        if self.delete_on_drop && self.handle.0 != 0 && self.cleanup_recorded().is_err() {
+            // The durable receipt, not this diagnostic, carries recovery identity.
+            #[cfg(test)]
+            if !std::thread::panicking() {
+                panic!("unconfirmed PoC fixture cleanup; local recovery retained");
             }
+            eprintln!("cleanup incomplete; local recovery retained");
         }
     }
 }
@@ -353,7 +440,8 @@ impl Key {
             kind: info.provider,
             scope: info.scope,
             delete_on_drop: false,
-            finalized: true,
+            finalize_attempted: true,
+            recovery: None,
             initial_acl_error: None,
         })
     }
@@ -479,20 +567,68 @@ impl Key {
         )
     }
 
-    pub fn delete(mut self) -> Result<(), String> {
-        cng("delete PoC-owned key", unsafe {
-            NCryptDeleteKey(
-                self.handle.0,
-                if self.kind == Provider::Tpm {
-                    0
-                } else {
-                    NCRYPT_SILENT_FLAG
-                },
-            )
-        })?;
-        self.handle.0 = 0;
-        Ok(())
+    pub fn delete(mut self) -> Result<recovery::CleanupOutcome, String> {
+        self.cleanup_recorded()
     }
+
+    fn cleanup_recorded(&mut self) -> Result<recovery::CleanupOutcome, String> {
+        use recovery::CleanupOutcome;
+        self.delete_on_drop = false;
+        if self.recovery.is_none() {
+            let identity = effective_identity()?;
+            self.inspection(&identity)?;
+            self.recovery = Some(recovery::Receipt::for_existing(self.info()?, &identity)?);
+        }
+        let receipt = self
+            .recovery
+            .as_mut()
+            .ok_or("missing local recovery receipt")?;
+        receipt.refresh()?;
+        if let Some(outcome) = receipt.record.cleanup
+            && outcome != CleanupOutcome::Incomplete
+        {
+            return Ok(CleanupOutcome::Absent); // Prior confirmed disposal of this exact identity.
+        }
+        let (outcome, status) = if !self.finalize_attempted {
+            let status = unsafe { NCryptFreeObject(self.handle.0) };
+            if status == 0 {
+                self.handle.0 = 0;
+                (CleanupOutcome::NeverPersisted, 0)
+            } else {
+                (CleanupOutcome::Incomplete, status)
+            }
+        } else {
+            let status = if recovery::delete_denied() {
+                0x80090010u32 as i32
+            } else {
+                unsafe {
+                    NCryptDeleteKey(
+                        self.handle.0,
+                        if self.kind == Provider::Tpm {
+                            0
+                        } else {
+                            NCRYPT_SILENT_FLAG
+                        },
+                    )
+                }
+            };
+            match status as u32 {
+                0 => {
+                    self.handle.0 = 0;
+                    (CleanupOutcome::Succeeded, status)
+                }
+                0x80090011 => (CleanupOutcome::Absent, status),
+                _ => (CleanupOutcome::Incomplete, status),
+            }
+        };
+        receipt.finish(outcome, Some(status as u32))?;
+        if outcome == CleanupOutcome::Incomplete {
+            Err("cleanup incomplete; local recovery retained".into())
+        } else {
+            Ok(outcome)
+        }
+    }
+    #[cfg(test)]
     pub fn create(kind: Provider, scope: Scope, identity: &Identity) -> Result<Self, String> {
         Self::create_named(
             kind,
@@ -502,13 +638,21 @@ impl Key {
         )
     }
 
+    #[cfg(test)]
     pub fn create_named(
         kind: Provider,
         scope: Scope,
         identity: &Identity,
         name: &str,
     ) -> Result<Self, String> {
-        Self::create_measured(kind, scope, identity, name, true)
+        Self::create_measured(
+            kind,
+            scope,
+            identity,
+            name,
+            true,
+            ContextPurpose::Diagnostic,
+        )
     }
 
     // Only the diagnostic key-probe may return an ACL-rejected key to its local, fixed
@@ -519,6 +663,7 @@ impl Key {
         identity: &Identity,
         name: &str,
         enforce_acl: bool,
+        purpose: ContextPurpose,
     ) -> Result<Self, String> {
         let suffix = name
             .strip_prefix("RoLauncher.IdentityPoC.")
@@ -527,14 +672,17 @@ impl Key {
         if id.get_version_num() != 4 || id.to_string() != suffix {
             return Err("invalid PoC name".into());
         }
-        if identity.thread_token || identity.service || identity.restricted {
-            return Err(
-                "unsupported token context: impersonation, service or restricted token".into(),
-            );
-        }
+        identity.accept(purpose)?;
         let provider = provider(kind)?;
+        let planned = PublicKey {
+            name: name.into(),
+            provider: kind,
+            scope,
+            blob: Vec::new(),
+        };
+        let mut receipt = recovery::Receipt::prepare(planned, identity)?;
         let mut handle = 0;
-        cng("create persisted key", unsafe {
+        let created = unsafe {
             NCryptCreatePersistedKey(
                 provider.0,
                 &mut handle,
@@ -548,7 +696,15 @@ impl Key {
                         0
                     },
             )
-        })?;
+        };
+        if created != 0 {
+            receipt.finish(
+                recovery::CleanupOutcome::NeverPersisted,
+                Some(created as u32),
+            )?;
+            return cng("create persisted key", created)
+                .and_then(|_| Err("unexpected creation result".into()));
+        }
         let mut key = Self {
             handle: Object(handle),
             _provider: provider,
@@ -556,51 +712,34 @@ impl Key {
             kind,
             scope,
             delete_on_drop: true,
-            finalized: false,
+            finalize_attempted: false,
+            recovery: Some(receipt),
             initial_acl_error: None,
         };
-        set_number(handle, NCRYPT_LENGTH_PROPERTY, 2048)?;
-        set_number(handle, NCRYPT_EXPORT_POLICY_PROPERTY, 0)?;
-        set_number(handle, NCRYPT_KEY_USAGE_PROPERTY, NCRYPT_ALLOW_SIGNING_FLAG)?;
-        // Request protection before finalization; measure whether the provider honors it.
-        let descriptor = wide(&format!("D:P(A;;GA;;;SY)(A;;GA;;;{})", identity.sid));
-        let mut pointer = null_mut();
-        let mut length = 0;
-        if unsafe {
-            ConvertStringSecurityDescriptorToSecurityDescriptorW(
-                descriptor.as_ptr(),
-                1,
-                &mut pointer,
-                &mut length,
-            )
-        } == 0
-        {
-            return Err(win_error("PoC descriptor"));
-        }
-        let allocation = LocalAllocation(pointer);
-        cng("set PoC DACL", unsafe {
-            NCryptSetProperty(
-                handle,
-                NCRYPT_SECURITY_DESCR_PROPERTY,
-                pointer.cast(),
-                length,
-                DACL_SECURITY_INFORMATION | NCRYPT_PERSIST_FLAG,
-            )
-        })?;
-        cng("finalize key", unsafe {
-            NCryptFinalizeKey(handle, NCRYPT_SILENT_FLAG)
-        })?;
-        key.finalized = true;
-        // PCP may materialize inherited ACLs at finalization despite accepting the earlier
-        // property. Measure this explicitly; post-finalize repair is experimental only.
-        key.initial_acl_error = key.inspection(identity).err();
-        if enforce_acl && let Some(error) = &key.initial_acl_error {
-            return Err(format!(
-                "provider did not retain requested initial key policy/ACL: {error}"
-            ));
-        }
-        if key.initial_acl_error.is_some() {
-            cng("reapply PoC DACL after finalize", unsafe {
+        let result: Result<(), String> = (|| {
+            key.recovery.as_mut().unwrap().record.phase = recovery::Phase::Created;
+            key.recovery.as_mut().unwrap().save()?;
+            recovery::checkpoint(recovery::FaultStage::BeforeFinalize)?;
+            set_number(handle, NCRYPT_LENGTH_PROPERTY, 2048)?;
+            set_number(handle, NCRYPT_EXPORT_POLICY_PROPERTY, 0)?;
+            set_number(handle, NCRYPT_KEY_USAGE_PROPERTY, NCRYPT_ALLOW_SIGNING_FLAG)?;
+            // Request protection before finalization; measure whether the provider honors it.
+            let descriptor = wide(&format!("D:P(A;;GA;;;SY)(A;;GA;;;{})", identity.sid));
+            let mut pointer = null_mut();
+            let mut length = 0;
+            if unsafe {
+                ConvertStringSecurityDescriptorToSecurityDescriptorW(
+                    descriptor.as_ptr(),
+                    1,
+                    &mut pointer,
+                    &mut length,
+                )
+            } == 0
+            {
+                return Err(win_error("PoC descriptor"));
+            }
+            let allocation = LocalAllocation(pointer);
+            cng("set PoC DACL", unsafe {
                 NCryptSetProperty(
                     handle,
                     NCRYPT_SECURITY_DESCR_PROPERTY,
@@ -609,12 +748,52 @@ impl Key {
                     DACL_SECURITY_INFORMATION | NCRYPT_PERSIST_FLAG,
                 )
             })?;
+            key.recovery.as_mut().unwrap().record.phase = recovery::Phase::FinalizeAttempted;
+            key.recovery.as_mut().unwrap().save()?;
+            key.finalize_attempted = true;
+            cng("finalize key", unsafe {
+                NCryptFinalizeKey(handle, NCRYPT_SILENT_FLAG)
+            })?;
+            let public = key.public()?;
+            let receipt = key.recovery.as_mut().unwrap();
+            receipt.record.phase = recovery::Phase::Finalized;
+            receipt.record.key.blob = public;
+            receipt.save()?;
+            recovery::checkpoint(recovery::FaultStage::AfterFinalize)?;
+            // PCP may materialize inherited ACLs at finalization despite accepting the earlier
+            // property. Measure this explicitly; post-finalize repair is experimental only.
+            key.initial_acl_error = key.inspection(identity).err();
+            if enforce_acl && let Some(error) = &key.initial_acl_error {
+                return Err(format!(
+                    "provider did not retain requested initial key policy/ACL: {error}"
+                ));
+            }
+            if key.initial_acl_error.is_some() {
+                cng("reapply PoC DACL after finalize", unsafe {
+                    NCryptSetProperty(
+                        handle,
+                        NCRYPT_SECURITY_DESCR_PROPERTY,
+                        pointer.cast(),
+                        length,
+                        DACL_SECURITY_INFORMATION | NCRYPT_PERSIST_FLAG,
+                    )
+                })?;
+            }
+            drop(allocation);
+            if enforce_acl {
+                key.inspection(identity)?;
+            }
+            Ok(())
+        })();
+        match result {
+            Ok(()) => Ok(key),
+            Err(error) => match key.cleanup_recorded() {
+                Ok(outcome) => Err(format!("{error}; cleanup outcome: {outcome:?}")),
+                Err(_) => Err(format!(
+                    "{error}; cleanup incomplete; local recovery retained"
+                )),
+            },
         }
-        drop(allocation);
-        if enforce_acl {
-            key.inspection(identity)?;
-        }
-        Ok(key)
     }
 
     pub fn public(&self) -> Result<Vec<u8>, String> {
@@ -764,6 +943,7 @@ pub enum Candidate {
 struct State {
     schema_version: u16,
     candidate: Candidate,
+    purpose: ContextPurpose,
     owner_sid_reference: [u8; 32],
     installation_evidence: [u8; 32],
     installation: PublicKey,
@@ -844,15 +1024,29 @@ fn read_state(path: &std::path::Path) -> Result<State, String> {
 }
 
 pub fn create_state(candidate: Candidate, path: &std::path::Path) -> Result<(), String> {
+    create_state_for(candidate, path, ContextPurpose::Enrollment)
+}
+
+pub fn measure_state(candidate: Candidate, path: &std::path::Path) -> Result<(), String> {
+    create_state_for(candidate, path, ContextPurpose::Diagnostic)
+}
+
+fn create_state_for(
+    candidate: Candidate,
+    path: &std::path::Path,
+    purpose: ContextPurpose,
+) -> Result<(), String> {
     use std::io::Write;
+    let identity = effective_identity()?;
+    identity.accept(purpose)?;
     // Reserve the state file first. No replacement, new identity or key deletion on collision.
     let mut file = std::fs::OpenOptions::new()
         .write(true)
         .create_new(true)
         .open(path)
         .map_err(|_| "PoC state already exists or is inaccessible")?;
-    let result = (|| {
-        let identity = effective_identity()?;
+    let mut owned = Vec::new();
+    let result: Result<(), String> = (|| {
         let evidence = machine_evidence()?;
         let provider = if matches!(candidate, Candidate::C) {
             Provider::Tpm
@@ -864,31 +1058,82 @@ pub fn create_state(candidate: Candidate, path: &std::path::Path) -> Result<(), 
         } else {
             Scope::Machine
         };
-        let mut installation = Key::create(provider, scope, &identity)?;
-        let mut user = Key::create(provider, Scope::User, &identity)?;
+        owned.push(Key::create_measured(
+            provider,
+            scope,
+            &identity,
+            &format!("RoLauncher.IdentityPoC.{}", uuid::Uuid::new_v4()),
+            true,
+            purpose,
+        )?);
+        recovery::checkpoint(recovery::FaultStage::AfterFirstKey)?;
+        owned.push(Key::create_measured(
+            provider,
+            Scope::User,
+            &identity,
+            &format!("RoLauncher.IdentityPoC.{}", uuid::Uuid::new_v4()),
+            true,
+            purpose,
+        )?);
         let state = State {
             schema_version: 1,
             candidate,
+            purpose,
             owner_sid_reference: identity.sid_reference,
             installation_evidence: evidence,
-            installation: installation.info()?,
-            user: user.info()?,
+            installation: owned[0].info()?,
+            user: owned[1].info()?,
         };
         let bytes =
             serde_json::to_vec_pretty(&state).map_err(|_| "cannot encode PoC public state")?;
-        file.write_all(&bytes)
+        let split = bytes.len() / 2;
+        file.write_all(&bytes[..split])
             .and_then(|_| file.sync_all())
             .map_err(|_| "cannot persist PoC public state")?;
-        installation.delete_on_drop = false;
-        user.delete_on_drop = false;
+        recovery::checkpoint(recovery::FaultStage::PersistState)?;
+        file.write_all(&bytes[split..])
+            .and_then(|_| file.sync_all())
+            .map_err(|_| "cannot persist PoC public state")?;
+        for key in &mut owned {
+            let receipt = key.recovery.as_mut().unwrap();
+            receipt.record.phase = recovery::Phase::RetainedForState;
+            receipt.save()?;
+        }
+        for key in &mut owned {
+            key.delete_on_drop = false;
+        }
         Ok(())
     })();
     drop(file);
-    if result.is_err() {
-        std::fs::remove_file(path)
-            .map_err(|_| "failed PoC enrollment; empty public state cleanup required")?;
+    if let Err(error) = result {
+        // Failed state and every pre-creation receipt remain strictly local, including
+        // partial writes. Explicit cleanup, never Drop logging, determines the outcome.
+        return match cleanup_owned(owned) {
+            Ok(outcomes) => Err(format!(
+                "{error}; owned key cleanup: {outcomes:?}; failed state retained locally"
+            )),
+            Err(_) => Err(format!(
+                "{error}; cleanup incomplete; local recovery retained"
+            )),
+        };
     }
-    result
+    Ok(())
+}
+
+fn cleanup_owned(keys: Vec<Key>) -> Result<Vec<recovery::CleanupOutcome>, String> {
+    let mut outcomes = Vec::new();
+    let mut incomplete = false;
+    for key in keys {
+        match key.delete() {
+            Ok(outcome) => outcomes.push(outcome),
+            Err(_) => incomplete = true,
+        }
+    }
+    if incomplete {
+        Err("cleanup incomplete; local recovery retained".into())
+    } else {
+        Ok(outcomes)
+    }
 }
 
 fn bound_challenge(
@@ -896,9 +1141,7 @@ fn bound_challenge(
     identity: &Identity,
     evidence: [u8; 32],
 ) -> Result<super::Challenge, String> {
-    if identity.thread_token || identity.service || identity.restricted {
-        return Err("unsupported effective token for PoC authorization".into());
-    }
+    identity.accept(state.purpose)?;
     if identity.sid_reference != state.owner_sid_reference {
         return Err("Windows user mismatch; no automatic authorization".into());
     }
@@ -918,7 +1161,16 @@ fn bound_challenge(
 }
 
 pub fn check_state(path: &std::path::Path) -> Result<(), String> {
+    check_state_for(path, ContextPurpose::Enrollment)
+}
+pub fn measure_check(path: &std::path::Path) -> Result<(), String> {
+    check_state_for(path, ContextPurpose::Diagnostic)
+}
+fn check_state_for(path: &std::path::Path, purpose: ContextPurpose) -> Result<(), String> {
     let state = read_state(path)?;
+    if state.purpose != purpose {
+        return Err("state context purpose mismatch; diagnostic evidence is not enrollment".into());
+    }
     let identity = effective_identity()?;
     let challenge = bound_challenge(&state, &identity, machine_evidence()?)?;
     let installation = Key::open(&state.installation)?;
@@ -934,7 +1186,7 @@ pub fn check_state(path: &std::path::Path) -> Result<(), String> {
         .verify(&challenge, &proof)
 }
 
-pub fn cleanup_state(path: &std::path::Path) -> Result<(), String> {
+pub fn cleanup_state(path: &std::path::Path) -> Result<Vec<recovery::CleanupOutcome>, String> {
     let state = read_state(path)?;
     let identity = effective_identity()?;
     if identity.sid_reference != state.owner_sid_reference
@@ -947,18 +1199,23 @@ pub fn cleanup_state(path: &std::path::Path) -> Result<(), String> {
     // Each deletion independently requires namespace, public-key and ACL verification.
     // Keep trying other owned keys after loss/denial; never misreport partial cleanup as complete.
     let mut errors = Vec::new();
+    let mut outcomes = Vec::new();
     for info in [&state.installation, &state.user] {
         let result = (|| {
+            if recovery::confirmed_disposal(info, &identity)? {
+                return Ok(recovery::CleanupOutcome::Absent);
+            }
             let key = Key::open(info)?;
             key.inspection(&identity)?;
             key.delete()
         })();
-        if let Err(error) = result {
-            errors.push(error);
+        match result {
+            Ok(outcome) => outcomes.push(outcome),
+            Err(error) => errors.push(error),
         }
     }
     if errors.is_empty() {
-        Ok(())
+        Ok(outcomes)
     } else {
         Err(format!(
             "PoC cleanup incomplete or keyset absent/unreadable; retain public state: {}",
@@ -972,8 +1229,8 @@ fn context() -> Result<serde_json::Value, String> {
     Ok(
         serde_json::json!({"effective_token": if identity.thread_token {"thread"} else {"process"},
         "elevated": identity.elevated, "restricted": identity.restricted, "session_zero": identity.session_zero,
-        "service_identity": identity.service, "raw_sid_output": false,
-        "ordinary_interactive_user_evidence": !identity.elevated && !identity.restricted && !identity.session_zero && !identity.service && !identity.thread_token}),
+        "service_identity": identity.service, "logon_context": identity.logon, "diagnostic_context_supported": identity.accept(ContextPurpose::Diagnostic).is_ok(), "raw_sid_output": false,
+        "ordinary_interactive_user_evidence": identity.accept(ContextPurpose::Enrollment).is_ok()}),
     )
 }
 
@@ -1002,7 +1259,7 @@ fn capabilities() -> serde_json::Value {
     serde_json::json!({"providers": results, "context": context().unwrap_or_else(|error| serde_json::json!({"error":error})), "cross_user": "not tested by this command", "reboot": "not tested by this command"})
 }
 
-fn probe_key(kind: Provider, scope: Scope) -> Result<serde_json::Value, String> {
+pub fn probe_key(kind: Provider, scope: Scope) -> Result<serde_json::Value, String> {
     let identity = effective_identity()?;
     let key = Key::create_measured(
         kind,
@@ -1010,32 +1267,38 @@ fn probe_key(kind: Provider, scope: Scope) -> Result<serde_json::Value, String> 
         &identity,
         &format!("RoLauncher.IdentityPoC.{}", uuid::Uuid::new_v4()),
         false,
+        ContextPurpose::Diagnostic,
     )?;
-    let info = key.info()?;
-    let reopened = Key::open_raw(&info)?;
-    let report = reopened.inspection(&identity);
-    let provisioning = key.inspection(&identity);
-    let accepted = report.is_ok() && provisioning.is_ok() && key.initial_acl_error.is_none();
-    let implementation = number(key._provider.0, NCRYPT_IMPL_TYPE_PROPERTY)?;
-    let digest = hash(b"RoLauncher-Identity-PoC-provider-probe-v1")?;
-    verify(&info.blob, &digest, &reopened.sign(&digest)?)?;
-    drop(reopened);
-    key.delete()?;
-    if Key::open(&info).is_ok() {
-        return Err("key unexpectedly accessible after deletion".into());
-    }
-    Ok(
-        serde_json::json!({"context": context()?, "provider": kind, "scope": scope, "key_acl_result": report, "provisioning_acl_result": provisioning,
+    let result: Result<serde_json::Value, String> = (|| {
+        recovery::checkpoint(recovery::FaultStage::ProbeOperation)?;
+        let info = key.info()?;
+        let reopened = Key::open_raw(&info)?;
+        let report = reopened.inspection(&identity);
+        let provisioning = key.inspection(&identity);
+        let accepted = report.is_ok() && provisioning.is_ok() && key.initial_acl_error.is_none();
+        let implementation = number(key._provider.0, NCRYPT_IMPL_TYPE_PROPERTY)?;
+        let digest = hash(b"RoLauncher-Identity-PoC-provider-probe-v1")?;
+        verify(&info.blob, &digest, &reopened.sign(&digest)?)?;
+        drop(reopened);
+        Ok(
+            serde_json::json!({"context": context()?, "execution_purpose": "diagnostic", "enrollment_accepted": false, "provider": kind, "scope": scope, "key_acl_result": report, "provisioning_acl_result": provisioning,
         "provider_implementation": implementation,
         "local_key_policy_accepted": accepted, "sign_verify_reopen": "proven by real Windows test; does not imply acceptable ACLs", "cleanup": "deleted", "cross_user": "not tested", "reboot": "not tested", "attestation": "not tested"}),
-    )
+        )
+    })();
+    let cleanup = key.delete();
+    match (result, cleanup) {
+        (Ok(report), Ok(_)) => Ok(report),
+        (Err(error), Ok(outcome)) => Err(format!("{error}; cleanup outcome: {outcome:?}")),
+        (_, Err(_)) => Err("cleanup incomplete; local recovery retained".into()),
+    }
 }
 
 fn inspect_state(path: &std::path::Path) -> Result<serde_json::Value, String> {
     let state = read_state(path)?;
     let identity = effective_identity()?;
     Ok(
-        serde_json::json!({"candidate": state.candidate, "context": context()?,
+        serde_json::json!({"candidate": state.candidate, "execution_purpose": state.purpose, "enrollment_accepted": state.purpose == ContextPurpose::Enrollment && identity.accept(ContextPurpose::Enrollment).is_ok(), "context": context()?,
         "installation": Key::open(&state.installation)?.inspection(&identity)?,
         "user": Key::open(&state.user)?.inspection(&identity)?, "public_identifiers_omitted": true}),
     )
@@ -1044,9 +1307,7 @@ fn inspect_state(path: &std::path::Path) -> Result<serde_json::Value, String> {
 fn probe_state(path: &std::path::Path) -> Result<serde_json::Value, String> {
     let state = read_state(path)?;
     let identity = effective_identity()?;
-    if identity.thread_token || identity.service || identity.restricted {
-        return Err("native access probe requires unrestricted non-service process token".into());
-    }
+    identity.accept(ContextPurpose::Diagnostic)?;
     let mut results = Vec::new();
     // Deliberately bypass application SID/ACL policy checks. This measures OS key-use enforcement.
     // Fixed synthetic digest only; no caller-supplied arbitrary signing input.
@@ -1086,16 +1347,18 @@ pub fn run() -> Result<(), String> {
             let scope = match scope.as_str() { "user" => Scope::User, "machine" => Scope::Machine, _ => return Err("scope must be user or machine".into()) };
             probe_key(kind, scope)?
         },
-        [command, candidate, path] if command == "create" => {
+        [command, candidate, path] if command == "create" || command == "measure" => {
             let candidate = match candidate.as_str() { "A" => Candidate::A, "B" => Candidate::B, "C" => Candidate::C, _ => return Err("candidate must be A, B or C".into()) };
-            create_state(candidate, std::path::Path::new(path))?;
-            inspect_state(std::path::Path::new(path))?
+            if command == "create" { create_state(candidate, std::path::Path::new(path))?; } else { measure_state(candidate, std::path::Path::new(path))?; }
+            serde_json::json!({"state_persisted": true, "execution_purpose": if command == "create" {"enrollment"} else {"diagnostic"}, "enrollment_accepted": command == "create", "context": context()?})
         },
-        [command, path] if command == "check" => { check_state(std::path::Path::new(path))?; serde_json::json!({"synthetic_proof": "verified", "context": context()?, "customer_authenticated": false}) },
+        [command, path] if command == "check" || command == "measure-check" => { if command == "check" { check_state(std::path::Path::new(path))?; } else { measure_check(std::path::Path::new(path))?; } serde_json::json!({"synthetic_proof": "verified", "execution_purpose": if command == "check" {"enrollment"} else {"diagnostic"}, "enrollment_accepted": command == "check", "context": context()?, "customer_authenticated": false}) },
+        [command, path] if command == "recover" => serde_json::json!({"cleanup_outcome": recovery::recover(std::path::Path::new(path))?}),
+        [command] if command == "recovery-summary" => recovery::summary()? ,
         [command, path] if command == "inspect" => inspect_state(std::path::Path::new(path))?,
         [command, path] if command == "probe" => probe_state(std::path::Path::new(path))?,
-        [command, path] if command == "cleanup" => { cleanup_state(std::path::Path::new(path))?; serde_json::json!({"poc_key_cleanup": "complete", "public_state": "retained; remove manually"}) },
-        _ => return Err("Usage: context | capabilities | key-probe software|tpm user|machine | create A|B|C PUBLIC_STATE.json | check|inspect|probe|cleanup PUBLIC_STATE.json".into()),
+        [command, path] if command == "cleanup" => { let outcomes = cleanup_state(std::path::Path::new(path))?; serde_json::json!({"cleanup_outcomes": outcomes, "poc_key_cleanup": "complete", "public_state": "retained; remove manually"}) },
+        _ => return Err("Usage: context | capabilities | key-probe software|tpm user|machine | create|measure A|B|C PUBLIC_STATE.json | check|measure-check|inspect|probe|cleanup PUBLIC_STATE.json | recover LOCAL_RECEIPT.jsonl | recovery-summary".into()),
     };
     println!(
         "{}",

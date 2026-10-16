@@ -139,12 +139,37 @@ Fresh verifier instances require fresh nonces; reconstructing a verifier with an
 - TPM ACL repair is diagnostic only, remains rejected on this host, and must not become an implicit weaker enrollment path.
 - `NTE_BAD_KEYSET (0x80090016)` can mean absent or unreadable key storage; report ambiguity and recovery rather than inventing a corruption/deletion distinction.
 - Corrupt public metadata, policy/scope mismatch, wrong token, changed machine evidence and missing signatures fail closed without minting replacement keys.
-- Thread impersonation, anonymous, service and restricted token contexts cannot enroll identities; token handles and SID/security-descriptor allocations are released.
+- Enrollment requires an unelevated, unrestricted interactive process token outside session zero; impersonation, anonymous, service identities and unexpected logons fail closed.
 - Key-probe signs a fixed synthetic digest only; there is no arbitrary-data signing command, remote API or exported private key.
 - Machine/key loss requires reviewed recovery; no Roblox credentials, backups or installed-user data are migrated.
 - Only explicitly named PoC containers are deleted; cleanup verifies namespace, expected public key, current owner and ACL before deletion.
-- After partial loss, cleanup attempts remaining matching keys and returns an explicit incomplete/absent-keyset error; preserve public state until reviewed.
-- Initial sandbox/TPM exploratory cleanup failures were recovered locally; final namespace inventory found zero remaining owned user keys before regression tests.
+- Cleanup attempts every recorded owned key; confirmed disposal, never-persisted, absent and incomplete outcomes remain distinct. Ambiguous `NTE_BAD_KEYSET` retains recovery metadata.
+- Recovery uses exact local receipts and verified public-key/provider/scope/owner evidence; there is no native key enumeration or privileged remediation.
+
+## Review hardening: cleanup and context
+
+Each creation synchronizes a protected, append-only local recovery receipt before calling CNG.
+It records the UUID container, exact provider/scope, owner reference, public evidence when available, creation phase and explicit cleanup result.
+Failed enrollment retains even partial state; every created key is explicitly cleaned or accounted incomplete, independently of destructor logging.
+
+- `succeeded`: native deletion succeeded; `never_persisted`: creation failed or an unfinalized object was explicitly freed before any finalization attempt.
+- `absent`: native `NTE_NOT_FOUND`, or prior recorded successful deletion of that exact identity; ambiguous/unreadable keysets remain `incomplete`.
+- Receipts default to `target/identity-poc-recovery`; `ROLAUNCHER_IDENTITY_POC_RECOVERY_DIR` selects another strictly local directory.
+- `recover EXACT_RECEIPT.jsonl` retries only verified PoC UUID/provider/scope/public-key/owner evidence with acceptable ACLs; no replacement identity or enumeration.
+- Missing public evidence, torn records, mismatches or denied deletion preserve receipts for local review; no privileged remediation is supplied.
+- `recovery-summary` emits counts only; fixture cleanup failure fails tests and preserves state. The workflow fails on any incomplete or unintentionally retained key.
+
+`create`/`check` require ordinary interactive enrollment context.
+`measure`/`measure-check` and `key-probe` are explicit diagnostics; reports say `enrollment_accepted=false`, even when provider operations succeed.
+State stores its purpose, and the commands reject mismatched purposes.
+
+Token groups distinguish authenticated interactive, batch, service and network/unknown logons.
+Explicit diagnostics allow elevated/session-zero measurements and authenticated batch logons; service logons require session zero and reject service identities.
+Network, unknown, restricted and impersonated contexts are rejected; elevated hosted evidence cannot establish ordinary-user enrollment capability.
+
+The script isolates recovery/state outside the sole upload path, `measurements.json`; names, raw SIDs, public state and receipts never enter uploaded evidence.
+Native tests inject faults before finalization, after finalization, after the first key, during a synchronized partial state write, during probe operations and during deletion.
+The successful real-key sign/reopen/verify/delete tests remain, with recovery retries exercised against genuinely persisted software keys.
 
 ## Reproducible manual Windows matrix
 
@@ -158,7 +183,7 @@ Do not upload public state files, SID/machine digests, private-key files or any 
 4. Copy **only** successful public state to a shared test folder; grant B read access to that file and executable without changing any key ACL.
 5. Sign in genuinely as B. Run `probe SHARED_STATE.json`; require `owner_sid_matches=false`, then record raw native open/sign outcomes for M and U independently.
 6. Run `check` as B; require user-mismatch denial even if machine public information is readable. If B exercises U, isolation failed; machine readability alone cannot grant authorization.
-7. Sign in as A again, run elevated A's `context`/`check`, then unelevated A's `check`; verify the same SID and keys locally. Over-the-shoulder elevation as another account is a different principal and must be denied.
+7. Sign in as A again: elevated `check` must reject enrollment. Use separate `measure`/`measure-check` state for explicit elevated diagnostics, then unelevated `check` on the original enrollment; different-account elevation must be denied.
 8. On a separately provisioned disposable machine, test TPM absent/disabled and unsupported configurations; record nonzero operations with no provider substitution. Do not disable TPM on the developer's machine.
 9. Copy public state to another disposable installation and run `check`/`probe`; require evidence/key mismatch or unavailable original keys. Create a fresh identity there and compare public references locally.
 10. In the disposable environment only, remove one **PoC-owned** key with Windows CNG tooling using its exact recorded name; require recovery, never automatic replacement. Run `cleanup` to remove the remaining matching key and retain any incomplete result.
@@ -186,7 +211,7 @@ The experiment does not establish a production uninstall or recovery policy.
 ## Validation record
 
 Approved test seams: offline challenge verifier, effective Windows-token identity and isolated CNG lifecycle/ACL harness.
-Fourteen PoC tests pass: two portable encoding/context tests and twelve native Windows tests; none are ignored.
+Twenty PoC tests cover the original fourteen contracts plus cleanup faults, recovery validation, fixture failure and diagnostic/enrollment policy; none are ignored.
 SID substitution and copied-state tests simulate hostile inputs; they do not replace genuine cross-user or copied-profile validation.
 
 Red/green checkpoints covered canonical encoding, incomplete context, token retrieval, native signing, verified reopen/deletion, two-key verification, state persistence and partial cleanup.

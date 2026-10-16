@@ -1,11 +1,15 @@
 param([string]$EvidenceDirectory = 'target/identity-poc-evidence')
 $ErrorActionPreference = 'Stop'
 $taskRoot = Split-Path -Parent $PSScriptRoot
+$taskPreviousRecovery = $env:ROLAUNCHER_IDENTITY_POC_RECOVERY_DIR
 Push-Location -LiteralPath $taskRoot
 try {
     . "$PSScriptRoot/environment.ps1"
     $taskEvidence = [IO.Path]::GetFullPath((Join-Path $taskRoot $EvidenceDirectory))
     New-Item -ItemType Directory -Force -Path $taskEvidence | Out-Null
+    $taskLocal = Join-Path $taskRoot ('target/identity-poc-local/' + [guid]::NewGuid().ToString())
+    New-Item -ItemType Directory -Force -Path $taskLocal | Out-Null
+    $env:ROLAUNCHER_IDENTITY_POC_RECOVERY_DIR = Join-Path $taskLocal 'recovery'
     & cargo test --locked --example windows-device-identity
     if ($LASTEXITCODE -ne 0) { throw 'PoC contract tests failed' }
     & cargo build --locked --example windows-device-identity
@@ -28,7 +32,9 @@ try {
     }
     $taskWindows = Get-ItemProperty 'HKLM:\SOFTWARE\Microsoft\Windows NT\CurrentVersion'
     $taskReport = [ordered]@{
-        status='Measurements, not a security acceptance verdict; failures and missing contexts remain explicit'
+        status='Diagnostic capability measurements; never standard-user enrollment acceptance'
+        source_sha=(& git rev-parse HEAD)
+        source_event=$env:GITHUB_EVENT_NAME
         windows=[ordered]@{ build=$taskWindows.CurrentBuildNumber; revision=$taskWindows.UBR; display_version=$taskWindows.DisplayVersion }
         context=(Invoke-Poc @('context'))
         capabilities=(Invoke-Poc @('capabilities'))
@@ -42,17 +48,15 @@ try {
         }
     }
     foreach ($taskCandidate in @('A','B','C')) {
-        $taskState = Join-Path $taskEvidence ("private-local-public-state-$taskCandidate-" + [guid]::NewGuid().ToString() + '.json')
-        $taskTrial = [ordered]@{ create=(Invoke-Poc @('create',$taskCandidate,$taskState)) }
-        # A create command can persist state before a later reopen/inspection failure.
-        # Any retained state still requires cleanup, even when command exit status is nonzero.
-        if (Test-Path -LiteralPath $taskState) {
+        $taskState = Join-Path $taskLocal ("private-local-public-state-$taskCandidate-" + [guid]::NewGuid().ToString() + '.json')
+        $taskTrial = [ordered]@{ create=(Invoke-Poc @('measure',$taskCandidate,$taskState)) }
+        # Failed creation explicitly accounts cleanup and preserves partial state locally.
+        # Successful diagnostic state requires explicit disposal after all measurements.
+        if ($taskTrial.create.exit_code -eq 0) {
             try {
-                if ($taskTrial.create.exit_code -eq 0) {
-                    $taskTrial.restart = Invoke-Poc @('check',$taskState)
-                    $taskTrial.inspect = Invoke-Poc @('inspect',$taskState)
-                    $taskTrial.owner_native_probe = Invoke-Poc @('probe',$taskState)
-                }
+                $taskTrial.restart = Invoke-Poc @('measure-check',$taskState)
+                $taskTrial.inspect = Invoke-Poc @('inspect',$taskState)
+                $taskTrial.owner_native_probe = Invoke-Poc @('probe',$taskState)
             } finally {
                 $taskTrial.cleanup = Invoke-Poc @('cleanup',$taskState)
                 if ($taskTrial.cleanup.exit_code -eq 0) { Remove-Item -LiteralPath $taskState }
@@ -60,12 +64,19 @@ try {
         }
         $taskReport.measurements["candidate-$taskCandidate"] = $taskTrial
     }
+    $taskReport.recovery_accounting = Invoke-Poc @('recovery-summary')
     # Only this sanitized report is uploadable. Never upload PoC public state, SID references,
     # registry evidence, names or blobs. Keep failed-cleanup state local for recovery.
     $taskReport | ConvertTo-Json -Depth 20 | Set-Content -LiteralPath (Join-Path $taskEvidence 'measurements.json') -Encoding utf8
     Write-Output 'PoC measurements saved; inspect operation exit codes. Missing hardware/contexts are not passes.'
     foreach ($taskTrial in $taskReport.measurements.Values) {
         if ($taskTrial.Contains('cleanup') -and $taskTrial.cleanup.exit_code -ne 0) { throw 'PoC cleanup failed; retain local public state for recovery' }
-        if ($taskTrial.Contains('error') -and $taskTrial.error.Contains('cleanup requires retry')) { throw 'PoC probe cleanup failed; do not treat this as hardware unavailability' }
+        if ($taskTrial.Contains('error') -and $taskTrial.error.Contains('cleanup incomplete')) { throw 'PoC probe cleanup incomplete; retain local recovery receipts' }
     }
-} finally { Pop-Location }
+    if ($taskReport.recovery_accounting.exit_code -ne 0) { throw 'PoC recovery accounting unavailable' }
+    $taskAccounting = $taskReport.recovery_accounting.output | ConvertFrom-Json
+    if ($taskAccounting.incomplete -ne 0 -or $taskAccounting.intentionally_retained -ne 0) { throw 'PoC key cleanup unconfirmed; retain strictly local recovery receipts' }
+} finally {
+    $env:ROLAUNCHER_IDENTITY_POC_RECOVERY_DIR = $taskPreviousRecovery
+    Pop-Location
+}
