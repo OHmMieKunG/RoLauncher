@@ -8,8 +8,6 @@ using Microsoft.UI.Xaml.Media;
 
 namespace RoLauncher.Desktop;
 
-// The same wrapping layout on WinUI and Uno; WrapGrid's layout properties are
-// not implemented by the Linux renderer.
 public sealed class GameCardPanel : Panel
 {
     protected override Windows.Foundation.Size MeasureOverride(Windows.Foundation.Size availableSize)

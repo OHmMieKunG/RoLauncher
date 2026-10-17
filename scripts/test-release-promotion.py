@@ -56,10 +56,9 @@ class GitHubFixture:
                        head={"ref": "dev", "repo": {"full_name": REPO}})
         self.history = [{"sha": "b" * 40}]
         self.jobs = [{"name": n, "conclusion": "success", "head_sha": SHA}
-                     for n in ("Branch flow", "Windows checks", "Linux checks and package (Ubuntu 24.04)")]
+                     for n in ("Branch flow", "Windows checks")]
         self.branch = {"commit": {"sha": SHA}}
-        checks = ["Branch flow", "Windows checks", "Linux checks and package (Ubuntu 24.04)",
-                  "Linux checks (Ubuntu)", "Linux checks (Arch)"]
+        checks = ["Branch flow", "Windows checks"]
         self.rules = [{"type": t, "ruleset_id": 2} for t in ("pull_request", "non_fast_forward", "deletion")]
         self.rules.append({"type": "required_status_checks", "ruleset_id": 2, "parameters": {
             "strict_required_status_checks_policy": True,
@@ -68,9 +67,6 @@ class GitHubFixture:
         self.tag_rules = dict(id=1, target="tag", enforcement="active", bypass_actors=[],
                               conditions={"ref_name": {"include": ["refs/tags/v*", "refs/tags/beta-v*"], "exclude": []}},
                               rules=[{"type": "update"}, {"type": "deletion"}, {"type": "creation"}])
-        self.linux_run = dict(self.run, id=13, path=".github/workflows/linux.yml")
-        self.linux_jobs = [{"name": "Linux checks (" + n + ")", "conclusion": "success", "head_sha": SHA}
-                           for n in ("Ubuntu", "Arch")]
         self.release = None
         self.tag = None
         self.assets = {}
@@ -84,7 +80,6 @@ class GitHubFixture:
         prefix = "rolauncher-v2.3.4"
         for artifact_id, name, suffix, endings in (
             (30, "release-files", "-SHA256SUMS.txt", ["-setup-x64.exe", "-windows-x64.zip", "-source.zip"]),
-            (31, "release-linux-files", "-linux-SHA256SUMS.txt", ["-linux-x64.tar.gz"]),
         ):
             entries = {prefix + ending: ("synthetic " + ending).encode() for ending in endings}
             entries[prefix + suffix] = "".join(hashlib.sha256(data).hexdigest() + "  " + n + "\n"
@@ -106,7 +101,6 @@ class GitHubFixture:
         self.run.update(path=".github/workflows/beta-release.yml", head_branch="beta-v2.3.4", actor={"id": 7})
         self.jobs = [j for j in self.jobs if j["name"] != "Branch flow"]
         self.artifacts[0]["name"] = "beta-windows-attempt-1"
-        self.artifacts[1]["name"] = "beta-linux-attempt-1"
         self.tag = {"object": {"type": "commit", "sha": SHA}}
         return self
 
@@ -163,11 +157,9 @@ class GitHubFixture:
         if path == "/rulesets/1": return self.tag_rules
         if path == "/rulesets/2": return self.branch_ruleset
         if path == "/actions/runs/12/attempts/1/jobs?per_page=100": return {"jobs": self.jobs, "total_count": len(self.jobs)}
-        if path == "/actions/runs/13/attempts/1/jobs?per_page=100": return {"jobs": self.linux_jobs, "total_count": len(self.linux_jobs)}
         if path.startswith("/actions/workflows/linux.yml/runs?"): return {"workflow_runs": [self.linux_run], "total_count": 1}
         if path.startswith("/actions/workflows/ci-release.yml/runs?"): return {"workflow_runs": [self.run], "total_count": 1}
         if path == "/actions/runs/12": return self.run
-        if path == "/actions/runs/13": return self.linux_run
         if path == "/actions/workflows/release-promotion.yml": return {"state": self.publisher_state}
         if path == "/actions/runs/12/artifacts?per_page=100": return {"artifacts": self.artifacts, "total_count": len(self.artifacts)}
         if path.startswith("/actions/artifacts/"): return self.archives[int(path.split("/")[3])]
@@ -313,16 +305,18 @@ class PromotionTests(unittest.TestCase):
                     with self.assertRaises(ValueError): promote(api, github.run)
                     self.assertEqual(github.writes, [])
 
-    def test_either_completed_workflow_can_reconcile_exact_source_once(self):
-        for wakeup in ("ci", "linux"):
-            with self.subTest(wakeup=wakeup):
-                github = GitHubFixture().with_intent()
-                run = github.run if wakeup == "ci" else github.linux_run
-                event = dict(repository={"default_branch": "main"}, workflow_run=copy.deepcopy(run))
-                self.assertEqual(promote_event(github, event), "published")
-                github.writes.clear()
-                self.assertEqual(promote_event(github, event), "consumed")
-                self.assertEqual(github.writes, [])
+    def test_windows_workflow_reconciles_without_linux_and_rejects_retired_source(self):
+        github = GitHubFixture().with_intent()
+        event = dict(repository={"default_branch": "main"}, workflow_run=copy.deepcopy(github.run))
+        self.assertEqual(promote_event(github, event), "published")
+        github.writes.clear()
+        self.assertEqual(promote_event(github, event), "consumed")
+        self.assertEqual(github.writes, [])
+        github.run['path'] = '.github/workflows/linux.yml'
+        event['workflow_run'] = copy.deepcopy(github.run)
+        with self.assertRaisesRegex(ValueError, 'Unsupported source workflow'):
+            promote_event(github, event)
+        self.assertEqual(github.writes, [])
 
     def test_cli_disabled_or_wrong_event_never_contacts_github(self):
         script = str(Path(__file__).with_name("release_promotion.py"))
@@ -359,7 +353,7 @@ class PromotionTests(unittest.TestCase):
         receipt = json.loads(github.assets["release-promotion.json"]["data"])
         self.assertEqual(receipt["intent"], INTENT)
         self.assertEqual(receipt["source"], SHA)
-        self.assertEqual(len(receipt["files"]), 5)
+        self.assertEqual(len(receipt["files"]), 4)
         github.writes.clear()
         self.assertEqual(promote(github, github.run), "consumed")
         self.assertEqual(github.writes, [])
@@ -498,13 +492,13 @@ class PromotionTests(unittest.TestCase):
                 self.assertEqual(github.writes, [])
                 self.assertEqual(github.release, before)
 
-    def test_failed_linux_or_incomplete_api_evidence_denies(self):
-        for fault in ("linux-failed", "linux-skipped", "linux-source", "missing-digest", "intent-version", "pagination"):
+    def test_failed_windows_or_incomplete_api_evidence_denies(self):
+        for fault in ("windows-failed", "windows-skipped", "windows-source", "missing-digest", "intent-version", "pagination"):
             with self.subTest(fault=fault):
                 github = GitHubFixture().with_intent()
-                if fault == "linux-failed": github.linux_run["conclusion"] = "failure"
-                if fault == "linux-skipped": github.linux_jobs[1]["conclusion"] = "skipped"
-                if fault == "linux-source": github.linux_run["head_sha"] = "b" * 40
+                if fault == "windows-failed": github.jobs[1]["conclusion"] = "failure"
+                if fault == "windows-skipped": github.jobs[1]["conclusion"] = "skipped"
+                if fault == "windows-source": github.jobs[1]["head_sha"] = "b" * 40
                 if fault == "missing-digest": github.artifacts[0].pop("digest")
                 if fault == "intent-version": github.intent["version"] = "2.3.5"
                 if fault == "pagination": github.files += [{"filename": f"docs/{i}.md", "status": "added"} for i in range(99)]

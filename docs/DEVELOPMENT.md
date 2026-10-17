@@ -3,7 +3,7 @@
 ## Build and test
 
 Windows prerequisites: Rust 1.99.0, .NET 8 SDK, Python 3.13, Inno Setup 6.7+, Visual Studio C++ Build Tools, and Windows SDK.
-Dependencies are pinned. Linux: [setup and checks](LINUX.md).
+Dependencies are pinned. Only Windows builds and packages are supported.
 
 ```powershell
 .\scripts\build.ps1
@@ -38,7 +38,7 @@ Follow [AGENTS.md](../AGENTS.md). Documentation-only edits need no app release.
 - Local versions use `MAJOR.MINOR.PATCH-dev.<12 random hex digits>`.
 - Build/package scripts refresh the identity; the upcoming numeric target stays fixed.
 - Cargo/desktop builds reuse it. Run `python scripts/versioning.py` before a new direct local build.
-- Use `-UseCurrentVersion` (Linux: `--use-current-version`) for checks, nested builds, and CI.
+- Use `-UseCurrentVersion` for checks, nested builds, and CI.
 - Keep manifest, lockfile, README, runtime/desktop versions, installer labels, source, and filenames consistent.
 
 For an intentional stable release:
@@ -48,7 +48,7 @@ For an intentional stable release:
 3. Run `python scripts/check-release.py`.
 4. Package with `scripts/package.ps1 -UseCurrentVersion`.
 
-Publishing rejects dev identities. Main CI tests and publishes installer, portable/source ZIPs, and SHA256 checksums.
+Publishing rejects dev identities. Main CI tests and packages the Windows installer, portable/source ZIPs, and SHA256 checksums; publication remains separately disabled.
 Published artifacts stay unchanged; interrupted drafts resume only at the same commit.
 
 ## Local packaging

@@ -78,8 +78,9 @@ public sealed partial class MainWindow
             if (NavigationAnimationsEnabled())
             {
                 SwitchPage(AccountsTab, true);
-                await Task.Delay(50);
-                Assert(PageContent.Opacity >= .78 && PageContent.Opacity < 1 && Math.Abs(PageTransitionTransform.TranslateY) > .01,
+                for (var frame = 0; frame < 120 && _pageTransition?.GetCurrentTime() == TimeSpan.Zero; frame++)
+                    await Task.Delay(16);
+                Assert(_pageTransition?.GetCurrentTime() > TimeSpan.Zero && PageContent.Opacity >= .779 && PageContent.Opacity < 1 && Math.Abs(PageTransitionTransform.TranslateY) > .01,
                     $"Page fade and translation actually animate before settling (opacity {PageContent.Opacity}, offset {PageTransitionTransform.TranslateY}, state {_pageTransition?.GetCurrentState()}, time {_pageTransition?.GetCurrentTime()}).");
                 foreach (var destination in Destinations.Reverse())
                 {

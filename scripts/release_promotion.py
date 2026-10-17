@@ -20,11 +20,10 @@ REPO = "oangsa/RoLauncher"
 CI = ".github/workflows/ci-release.yml"
 BETA = ".github/workflows/beta-release.yml"
 STABLE_VERSION = r"(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)"
-CHECKS = {"Branch flow", "Windows checks", "Linux checks and package (Ubuntu 24.04)"}
-LINUX_CHECKS = {"Linux checks (Ubuntu)", "Linux checks (Arch)"}
+CHECKS = {"Branch flow", "Windows checks"}
 GITHUB_ACTIONS_ID = 15368  # Public GitHub Actions App, verified against hosted check runs.
 MAX_ARCHIVE_BYTES = 256 * 1024 * 1024
-MAX_EXPANDED_BYTES = 512 * 1024 * 1024  # Across both platform archives, not per entry.
+MAX_EXPANDED_BYTES = 512 * 1024 * 1024  # Across the complete artifact archive, not per entry.
 MAX_ENTRY_BYTES = 256 * 1024 * 1024
 MAX_CHECKSUM_BYTES = 1024 * 1024
 MAX_JSON_BYTES = 8 * 1024 * 1024
@@ -132,11 +131,11 @@ def protected_branches(call, strict=False):
             require(params.get("strict_required_status_checks_policy") is True,
                     "Strict up-to-date required checks must be enforced")
             for check in params["required_status_checks"]:
-                if check["context"] in CHECKS | LINUX_CHECKS:
+                if check["context"] in CHECKS:
                     require(type(check.get("integration_id")) is int and check["integration_id"] == GITHUB_ACTIONS_ID,
                             "Required check must originate from GitHub Actions")
                     checks.add(check["context"])
-        require(CHECKS | LINUX_CHECKS <= checks, "Required CI checks are not enforced by rulesets")
+        require(CHECKS <= checks, "Required CI checks are not enforced by rulesets")
         for rule_id in {r.get("ruleset_id") for r in rules}:
             require(type(rule_id) is int and rule_id > 0, "Missing branch ruleset source")
             source = call(f"/rulesets/{rule_id}")
@@ -175,8 +174,7 @@ def artifact_files(call, run, version, beta=False):
     require(result["total_count"] == len(result["artifacts"]) and len(result["artifacts"]) < 100,
             "Incomplete artifact evidence")
     prefix = "rolauncher-v" + version
-    layouts = {"beta-windows" if beta else "release-files": {prefix + s for s in ("-setup-x64.exe", "-windows-x64.zip", "-source.zip", "-SHA256SUMS.txt")},
-               "beta-linux" if beta else "release-linux-files": {prefix + s for s in ("-linux-x64.tar.gz", "-linux-SHA256SUMS.txt")}}
+    layouts = {"beta-windows" if beta else "release-files": {prefix + s for s in ("-setup-x64.exe", "-windows-x64.zip", "-source.zip", "-SHA256SUMS.txt")}}
     layouts = {f'{name}-attempt-{run["run_attempt"]}': entries for name, entries in layouts.items()}
     provenance = []
     expanded = 0
@@ -248,16 +246,6 @@ def promote(call, run, evidence=None):
     beta = intent["channel"] == "beta"
     source_checks = CHECKS - {"Branch flow"} if beta else CHECKS
     successful_jobs(call, run, source_checks)
-    linux_run = None
-    if not beta:
-        linux = call(f"/actions/workflows/linux.yml/runs?event=push&branch=main&head_sha={sha}&per_page=100")
-        require(linux["total_count"] == len(linux["workflow_runs"]) and linux["total_count"] == 1,
-                "One matching Linux validation run required")
-        linux_run = linux["workflow_runs"][0]
-        require(linux_run["head_sha"] == sha and linux_run["event"] == "push" and linux_run["head_branch"] == "main"
-                and linux_run["head_repository"]["full_name"] == REPO and linux_run["path"] == ".github/workflows/linux.yml",
-                "Wrong Linux validation source")
-        successful_jobs(call, linux_run, LINUX_CHECKS)
     if not beta:
         require(call("/branches/main")["commit"]["sha"] == sha, "Stale intent: main has advanced")
     manifest_version = tomllib.loads(content(call, "Cargo.toml", sha))["package"]["version"]
@@ -290,7 +278,7 @@ def promote(call, run, evidence=None):
                 "Version must advance latest published stable")
     # All candidate admission above is read-only. No human request until it succeeds.
     from owner_evidence import binding_for
-    binding = binding_for(intent, run, linux_run, receipt_data)
+    binding = binding_for(intent, run, receipt_data)
     require(evidence is not None, "Live owner evidence transport required")
     finishing = evidence.stage == 'finish'
     if not finishing:
@@ -300,8 +288,6 @@ def promote(call, run, evidence=None):
         if not beta:
             require(call('/branches/main')['commit']['sha'] == sha, 'Main advanced during preflight')
         unchanged_run(call, run, source_checks)
-        if linux_run:
-            unchanged_run(call, linux_run, LINUX_CHECKS)
         require(promotion_state(call, tag, sha, annotated=beta) == ref
                 and call('/releases/tags/' + tag, missing_ok=True) == release,
                 'Publication state changed during preflight; retry with fresh evidence')
@@ -351,8 +337,6 @@ def promote(call, run, evidence=None):
     if not beta:
         require(call('/branches/main')['commit']['sha'] == sha, 'Main advanced during owner wait')
     unchanged_run(call, run, source_checks)
-    if linux_run:
-        unchanged_run(call, linux_run, LINUX_CHECKS)
     require(promotion_state(call, tag, sha, annotated=beta), 'Version tag disappeared during owner wait')
     require(call(path + '/assets') == uploaded, 'Release assets changed during owner wait')
     current = call(path)
@@ -424,12 +408,7 @@ def promote_event(call, event, channel=None, evidence=None):
     run = call(f'/actions/runs/{source["id"]}')
     require(run["run_attempt"] == source["run_attempt"] and run["head_sha"] == source["head_sha"], "Stale workflow event")
     require(run["status"] == "completed" and run["conclusion"] == "success", "Triggering run did not succeed")
-    if run["path"] == ".github/workflows/linux.yml":
-        require(run["event"] == "push" and run["head_branch"] == "main"
-                and run["head_repository"]["full_name"] == REPO, "Linux wakeup must be an official main push")
-        runs = call(f'/actions/workflows/ci-release.yml/runs?event=push&branch=main&head_sha={run["head_sha"]}&per_page=100')
-        require(runs["total_count"] == 1 and len(runs["workflow_runs"]) == 1, "Matching source CI required")
-        run = runs["workflow_runs"][0]
+    require(run["path"] in (CI, BETA), "Unsupported source workflow")
     if channel:
         require(run["path"] == (BETA if channel == "beta" else CI), "Wrong publication channel")
     return promote(call, run, evidence)

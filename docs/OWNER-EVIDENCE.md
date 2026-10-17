@@ -11,7 +11,7 @@ Schema-1 feature, schema-2 hotfix and owner-pushed beta authorization remain unc
 Every channel now requires explicit signed bypass evidence and native immutability, replacing feature-mode's administrative attestation fallback.
 
 1. `workflow_run` checks out the trusted default-branch event SHA with nonpersisted credentials.
-2. `--stage prepare` checks source authority, exact source CI/Linux jobs, metadata, archive digests, checksums and hotfix source tree, entirely read-only.
+2. `--stage prepare` checks source authority, exact source Windows CI jobs, metadata, archive digests, checksums and hotfix source tree, entirely read-only.
 3. Only admitted candidates can generate a random 256-bit preflight challenge, uploaded by pinned `actions/upload-artifact`.
 4. Owner helper downloads the exact run/attempt artifact through local GitHub CLI, validates its GitHub archive digest and bounded ZIP inventory, then displays source/version/intent.
 5. After attended confirmation, helper collects live complete Ruleset inventory, every detail including bypass arrays, effective main/dev rules, and native immutability settings.
@@ -22,7 +22,7 @@ Every channel now requires explicit signed bypass evidence and native immutabili
 10. `--stage finish` repeats admission, requires local preflight acceptance for this binding, verifies fresh final controls, then rechecks authority, jobs, tag, release, assets and main before publication.
 
 `release-promotion.json` bytes and identity remain unchanged.
-Challenge binding additionally covers the complete intent, source and Linux run identities/attempts, and receipt SHA256.
+Challenge binding additionally covers the complete intent, Windows CI run identity/attempt, and receipt SHA256.
 It also binds repository numeric ID `1406138209`, owner ID `71574088`, workflow path, trusted SHA, publisher run/attempt, policy digest, inbox, nonce and phase.
 
 The three steps share only the trusted job's local files; no downloaded checkpoint executes candidate code.

@@ -140,7 +140,7 @@ async fn anti_afk_pause(
     StatusCode::NO_CONTENT
 }
 fn open_login(engine: Engine, expected: Option<String>) -> Result<StatusCode, ApiError> {
-    #[cfg(any(windows, target_os = "linux"))]
+    #[cfg(windows)]
     {
         let runtime = tokio::runtime::Handle::current();
         std::thread::Builder::new()
@@ -153,7 +153,7 @@ fn open_login(engine: Engine, expected: Option<String>) -> Result<StatusCode, Ap
             .map_err(|_| error("Unable to open browser sign-in".into()))?;
         Ok(StatusCode::ACCEPTED)
     }
-    #[cfg(not(any(windows, target_os = "linux")))]
+    #[cfg(not(windows))]
     {
         let _ = (engine, expected);
         Err(error("Browser sign-in requires Windows".into()))
@@ -473,7 +473,7 @@ pub async fn serve_on(engine: Engine, listener: tokio::net::TcpListener) -> Resu
         .map_err(|_| "Local API stopped unexpectedly".into())
 }
 
-#[cfg(all(test, any(windows, target_os = "linux")))]
+#[cfg(all(test, windows))]
 mod tests {
     use super::*;
     use tower::ServiceExt;

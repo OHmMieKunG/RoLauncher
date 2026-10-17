@@ -10,8 +10,6 @@ pub fn run(engine: Engine, _runtime: tokio::runtime::Handle, port: u16) -> Resul
         .to_path_buf();
     #[cfg(windows)]
     let shell = root.join("desktop").join("RoLauncher.Desktop.exe");
-    #[cfg(target_os = "linux")]
-    let shell = root.join("desktop").join("RoLauncher.Desktop");
     run_shell(engine, port, &shell)
 }
 fn run_shell(engine: Engine, port: u16, shell: &std::path::Path) -> Result<(), String> {

@@ -1,4 +1,4 @@
-# RoLauncher 1.8.2
+# RoLauncher 1.8.3
 
 Upcoming / Unreleased — changes since published stable 1.7.0.
 
@@ -10,6 +10,9 @@ Upcoming / Unreleased — changes since published stable 1.7.0.
 - Persist client/resource preferences through bulk edits, presets and encrypted backups; existing accounts retain their installed protocol and Normal mode.
 - Manage all instances with batch launch, stop, hide and restore controls.
 - Keep Network-only visibly unsupported; idle activity remains explicitly opt-in and experimental.
+
+This fork supports Windows 10/11 x64 only; Linux/Sober builds, packages, updates and CI jobs are removed.
+Published historical artifacts remain unchanged.
 
 Bloxstrap/Fishstrap must already match the installed player handler; simultaneous competing provider registration is unsupported.
 Headless means hidden background gameplay, not rendering disabled; live Roblox benchmarks and 25/60-minute idle validation remain outstanding.

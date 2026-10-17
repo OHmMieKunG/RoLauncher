@@ -37,7 +37,6 @@ public sealed partial class MainWindow : Window
     public MainWindow(Bootstrap config)
     {
         InitializeComponent();
-        // Linux detaches inline dialogs; keep them alive for subsequent opens.
         _accountDialog = AccountDialog;
         _presetLookupDialog = PresetLookupDialog;
         _api = new(config);
@@ -58,8 +57,6 @@ public sealed partial class MainWindow : Window
         _ = RefreshAsync();
 #if UI_SMOKE
         Root.Loaded += async (sender, e) => await SmokeAsync();
-#elif LINUX_UI_SMOKE
-        Root.Loaded += async (sender, e) => await LinuxSmokeAsync();
 #else
         Root.Loaded += (_, _) => StartUpdateChecks();
 #endif

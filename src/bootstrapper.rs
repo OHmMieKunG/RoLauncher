@@ -227,8 +227,8 @@ impl BootstrapperProvider for Bootstrapper {
                 provider: *self,
                 executable: None,
                 configuration: None,
-                available: true,
-                reason: "Existing Sober launch adapter".into(),
+                available: false,
+                reason: "Windows bootstrappers unavailable on this platform".into(),
             })
         }
         #[cfg(windows)]

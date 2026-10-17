@@ -145,7 +145,7 @@ class OwnerEvidenceTests(unittest.TestCase):
         self.assertNotEqual(pre['nonce'], final['nonce'])
         self.assertEqual(pre['binding'], final['binding'])
         self.assertEqual(pre['binding']['intent'], self.api.intent)
-        self.assertEqual(pre['binding']['linux']['id'], 13)
+        self.assertNotIn('linux', pre['binding'])
         self.assertTrue(self.api.release['immutable'])
 
     def test_signed_source_run_attempt_nonce_phase_policy_and_trusted_sha_binding(self):
@@ -486,16 +486,14 @@ class OwnerEvidenceTests(unittest.TestCase):
             evidence.validate_disclosure(changed, self.policy)
         evidence.validate_disclosure(changed, dict(self.policy, disclosure_sha256=evidence.digest(changed)))
 
-    def test_nested_source_linux_attempt_and_intent_binding(self):
+    def test_nested_source_attempt_and_intent_binding(self):
         c = self.prepare()
-        for field in ('source-sha', 'source-run', 'source-attempt', 'linux-sha', 'linux-attempt', 'intent', 'receipt'):
+        for field in ('source-sha', 'source-run', 'source-attempt', 'intent', 'receipt'):
             def change(payload):
                 binding = payload['challenge']['binding']
                 if field == 'source-sha': binding['source']['head_sha'] = 'f' * 40
                 if field == 'source-run': binding['source']['id'] += 1
                 if field == 'source-attempt': binding['source']['run_attempt'] += 1
-                if field == 'linux-sha': binding['linux']['head_sha'] = 'f' * 40
-                if field == 'linux-attempt': binding['linux']['run_attempt'] += 1
                 if field == 'intent': binding['intent']['id'] = 'different'
                 if field == 'receipt': binding['receipt_sha256'] = '0' * 64
             with self.subTest(field=field), self.assertRaisesRegex(ValueError, 'binding'):

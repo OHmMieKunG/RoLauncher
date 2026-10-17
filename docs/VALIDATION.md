@@ -1,5 +1,8 @@
 # Validation
 
+Current fork support: Windows 10/11 x64 only. Linux results below are historical; Linux jobs and packages are retired.
+See [current verification](PRODUCTION-VERIFICATION.md).
+
 Recorded checks below are historical results, not guarantees of live Roblox compatibility.
 Fixtures use isolated data and simulated accounts unless stated otherwise.
 

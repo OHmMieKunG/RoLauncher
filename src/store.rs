@@ -21,8 +21,6 @@ pub struct Store {
 }
 impl Store {
     pub fn new(directory: PathBuf) -> Result<Self, String> {
-        #[cfg(target_os = "linux")]
-        platform::private_directory(&directory)?;
         std::fs::create_dir_all(&directory)
             .map_err(|_| "Unable to create application data folder")?;
         Ok(Self { directory })
@@ -72,11 +70,6 @@ impl Store {
         }
         let mut options = std::fs::OpenOptions::new();
         options.write(true).create(true).truncate(true);
-        #[cfg(target_os = "linux")]
-        {
-            use std::os::unix::fs::OpenOptionsExt;
-            options.mode(0o600).custom_flags(libc::O_NOFOLLOW);
-        }
         let mut file = options
             .open(&temp)
             .map_err(|_| "Unable to write account database")?;

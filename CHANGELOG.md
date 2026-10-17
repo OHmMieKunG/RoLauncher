@@ -1,6 +1,6 @@
 # Changelog
 
-## [1.8.2] — Unreleased
+## [1.8.3] — Unreleased
 
 ### Added
 
@@ -12,6 +12,10 @@
 - Launch, stop, hide or restore all accounts; retain preferences through presets and encrypted backups.
 - Opt into experimental Headless foreground activity while the PC is idle, with cancellation and bounded retries.
 - Keep Network-only unsupported; competing Bloxstrap/Fishstrap protocol registration remains unsupported.
+
+### Changed
+
+- Support Windows 10/11 x64 only; remove Linux/Sober builds, packages, updates and CI jobs.
 
 [Status and limits](docs/headless-architecture.md#delivery-status).
 

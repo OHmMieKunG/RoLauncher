@@ -62,7 +62,7 @@ Neither visibility nor scheduling changes disable rendering or reduce memory all
 
 Use [Development](DEVELOPMENT.md) for prerequisites and `scripts/build.ps1` / `scripts/test.ps1`.
 `scripts/package.ps1` creates a fresh development identity, executable, loader, desktop, licenses, source, installer and checksums.
-Windows controls are unavailable on Linux; its existing Sober launcher behavior is preserved.
+This fork supports Windows 10/11 x64 only; Linux/Sober is unsupported.
 
 ## Delivery status
 

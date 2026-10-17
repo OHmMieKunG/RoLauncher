@@ -1,12 +1,12 @@
 #![cfg_attr(all(windows, not(debug_assertions)), windows_subsystem = "windows")]
 
-#[cfg(any(windows, target_os = "linux"))]
+#[cfg(windows)]
 fn main() {
     if let Err(error) = run() {
         rolauncher::ui::message(&error);
     }
 }
-#[cfg(any(windows, target_os = "linux"))]
+#[cfg(windows)]
 fn run() -> Result<(), String> {
     use rolauncher::{engine::Engine, platform, store::Store};
     let mut args = std::env::args().skip(1);
@@ -18,8 +18,6 @@ fn run() -> Result<(), String> {
     );
     #[cfg(windows)]
     let mut directory = rolauncher::store::default_directory(&local_app_data);
-    #[cfg(target_os = "linux")]
-    let mut directory = platform::data_directory()?;
     let mut diagnostic = false;
     let mut restore_backup = None;
     while let Some(arg) = args.next() {
@@ -47,8 +45,6 @@ fn run() -> Result<(), String> {
             }
         }
     }
-    #[cfg(target_os = "linux")]
-    platform::initialize(&directory)?;
     if diagnostic {
         let players = platform::players();
         let logs = players.as_ref().ok().map(|players| {
@@ -85,18 +81,11 @@ fn run() -> Result<(), String> {
     } else {
         multi.as_ref().err().unwrap().clone()
     };
-    #[cfg(target_os = "linux")]
-    let compatibility = match &multi {
-        Ok(_) => "Linux / Sober: built-in per-account runtime/IPC isolation; concurrent game sessions and UI parity require live validation".into(),
-        Err(error) => error.clone(),
-    };
     #[cfg(windows)]
     let launch_gate = multi
         .as_ref()
         .map(|guard| guard.launch_gate())
         .unwrap_or_else(|_| std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false)));
-    #[cfg(target_os = "linux")]
-    let launch_gate = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(multi.is_ok()));
     let engine = Engine::open_with_launch_gate(Store::new(directory)?, compatibility, launch_gate)?;
     let runtime = tokio::runtime::Builder::new_multi_thread()
         .worker_threads(2)
@@ -133,7 +122,7 @@ fn run() -> Result<(), String> {
     drop(multi);
     ui_result
 }
-#[cfg(not(any(windows, target_os = "linux")))]
+#[cfg(not(windows))]
 fn main() {
-    eprintln!("RoLauncher requires Windows 10/11 x64 or Linux x64");
+    eprintln!("RoLauncher requires Windows 10/11 x64");
 }

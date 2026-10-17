@@ -1,9 +1,9 @@
 [package]
 name = "rolauncher"
-version = "1.8.2-dev.6bec4ffd1d4a"
+version = "1.8.3-dev.3a1e4940f9af"
 edition = "2024"
 license = "GPL-3.0-only"
-description = "Roblox account launcher and recovery supervisor for Windows and Linux"
+description = "Roblox account launcher and recovery supervisor for Windows"
 
 [[bin]]
 name = "RoLauncher"
@@ -32,10 +32,6 @@ windows-sys = { version = "0.61", features = ["Win32_Foundation", "Win32_Securit
 windows = { version = "0.62", features = ["Win32_Foundation", "Win32_System_Com"] }
 webview2-com = "0.39"
 
-[target.'cfg(target_os = "linux")'.dependencies]
-libc = "0.2"
-chacha20poly1305 = "0.10"
-keyring = { version = "3.6", default-features = false, features = ["sync-secret-service", "crypto-rust"] }
 
 [profile.release]
 lto = "thin"

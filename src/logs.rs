@@ -133,8 +133,6 @@ pub struct Tail {
     pub path: PathBuf,
     pub offset: u64,
     pending: Vec<u8>,
-    #[cfg(target_os = "linux")]
-    inode: (u64, u64),
 }
 impl Tail {
     pub fn new(path: PathBuf, from_end: bool) -> std::io::Result<Self> {
@@ -144,29 +142,13 @@ impl Tail {
             0
         };
         Ok(Self {
-            path: path.clone(),
+            path,
             offset,
             pending: Vec::new(),
-            #[cfg(target_os = "linux")]
-            inode: {
-                use std::os::unix::fs::MetadataExt;
-                let metadata = std::fs::metadata(&path)?;
-                (metadata.dev(), metadata.ino())
-            },
         })
     }
     pub fn read(&mut self) -> std::io::Result<Vec<Signal>> {
         let mut f = File::open(&self.path)?;
-        #[cfg(target_os = "linux")]
-        {
-            use std::os::unix::fs::MetadataExt;
-            let metadata = f.metadata()?;
-            if (metadata.dev(), metadata.ino()) != self.inode {
-                return Err(std::io::Error::other(
-                    "Log descriptor changed; rediscover ownership",
-                ));
-            }
-        }
         if f.metadata()?.len() < self.offset {
             self.offset = 0;
             self.pending.clear();

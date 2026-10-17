@@ -1,11 +1,11 @@
-# RoLauncher 1.8.2-dev.6bec4ffd1d4a
+# RoLauncher 1.8.3-dev.3a1e4940f9af
 
 Development source based on published stable 1.7.0, targeting the next feature release.
 Adds per-account background client modes, provider selection, reversible resource profiles and monitoring in the existing launcher.
 See [implementation status](docs/headless-architecture.md#delivery-status) for tested behavior and live-validation limits.
 
 Manage Roblox accounts, save destinations, and rejoin disconnected sessions.
-Windows uses native WinUI; the shared Linux/Sober port remains a beta.
+Supports Windows 10/11 x64 with the native WinUI desktop. Linux support has been removed.
 
 ## Download
 
@@ -14,8 +14,6 @@ Build this development tree using [Development](docs/DEVELOPMENT.md).
 
 - Windows 10 (1809+) or Windows 11, x64.
 - Browser sign-in requires [WebView2](https://developer.microsoft.com/en-us/microsoft-edge/webview2/).
-- Linux: [1.7.0 preview](https://github.com/oangsa/RoLauncher/releases/tag/v1.7.0) and [setup](docs/LINUX.md#install-the-linux-preview).
-  Native GNOME/KDE and live Sober acceptance remain pending.
 
 ## Get started
 
@@ -39,7 +37,7 @@ Keep cookies private; never include them in bug reports.
 - Optional beta updates under **Settings → Updates**.
 
 Headless retains the actual Roblox client; it does not prove rendering stops.
-Network-only remains unsupported. See [upcoming changes](docs/RELEASE-1.8.2.md) and [feasibility research](docs/network-only-feasibility.md).
+Network-only remains unsupported. See [upcoming changes](docs/RELEASE-1.8.3.md) and [feasibility research](docs/network-only-feasibility.md).
 
 ## Documentation
 

@@ -289,7 +289,7 @@
           <TextBlock Text="General" FontSize="24" FontWeight="SemiBold" Margin="0,0,0,4"/>
           <Border Style="{StaticResource Card}"><StackPanel Spacing="12"><TextBlock Text="Appearance" Style="{StaticResource SectionTitle}"/><ComboBox x:Name="ThemePicker" Header="Theme" HorizontalAlignment="Stretch" SelectionChanged="Theme_Changed"><ComboBoxItem Content="System"/><ComboBoxItem Content="Light"/><ComboBoxItem Content="Dark"/></ComboBox><TextBlock Text="Saved automatically." Style="{StaticResource Caption}"/><TextBlock Text="Window" Style="{StaticResource SectionTitle}"/>
             <ComboBox x:Name="CloseBehavior" Header="On close" HorizontalAlignment="Stretch" SelectionChanged="CloseBehavior_Changed"><ComboBoxItem Content="Minimize to tray"/><ComboBoxItem Content="Close completely"/></ComboBox>
-            <TextBlock Text="Exiting stops rejoin; games stay open. Linux minimizes without a tray host." Style="{StaticResource Caption}" TextWrapping="Wrap"/>
+            <TextBlock Text="Exiting stops rejoin; games stay open." Style="{StaticResource Caption}" TextWrapping="Wrap"/>
           </StackPanel></Border>
           <Border Style="{StaticResource Card}"><StackPanel Spacing="12">
             <TextBlock Text="Game joining" Style="{StaticResource SectionTitle}"/>

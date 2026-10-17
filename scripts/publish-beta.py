@@ -1,4 +1,4 @@
-"""Publish checked Windows/Linux artifacts as a prerelease, preserving stable/latest."""
+"""Publish checked Windows artifacts as a prerelease, preserving stable/latest."""
 import hashlib
 from release_files import checked_files
 
@@ -28,7 +28,7 @@ def publish(call, files, version, sha, notes):
     else:
         # The pushed tag is mandatory. Never let the API create/move a version tag.
         release = call("/releases", "POST", {
-            "tag_name": tag, "name": f"RoLauncher {version} Beta — Linux/Sober",
+            "tag_name": tag, "name": f"RoLauncher {version} Beta — Windows",
             "body": body, "draft": True, "prerelease": True, "make_latest": "false",
         })
     upload = release["upload_url"].split("{")[0]

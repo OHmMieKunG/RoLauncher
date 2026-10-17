@@ -8,7 +8,7 @@ import tomllib
 import zipfile
 
 GOVERNANCE_PATHS = {
-    '.github/workflows/ci-release.yml', '.github/workflows/linux.yml',
+    '.github/workflows/ci-release.yml',
     '.github/workflows/beta-release.yml', '.github/workflows/release-promotion.yml',
     'scripts/release_promotion.py', 'scripts/hotfix_policy.py', 'scripts/branch-flow.py',
     'scripts/publish-release.py', 'scripts/publish-beta.py', 'scripts/test.ps1',
@@ -89,7 +89,7 @@ def patch_report(result, base, head, governance=False):
             require(path in GOVERNANCE_PATHS, 'Non-governance change in stable base: ' + path)
         else:
             allowed = path in {'Cargo.toml', 'Cargo.lock', 'README.md', 'CHANGELOG.md', 'desktop/CHANGELOG.txt'} or (
-                path.startswith(('src/', 'desktop/', 'desktop.tests/', 'desktop.linux/', 'tests/'))
+                path.startswith(('src/', 'desktop/', 'desktop.tests/', 'tests/'))
                 or re.fullmatch(r'scripts/test-[A-Za-z0-9_.-]+', path)
                 or re.fullmatch(r'docs/RELEASE-[0-9]+\.[0-9]+\.[0-9]+\.md', path))
             require(allowed, 'Unexpected hotfix path: ' + path)

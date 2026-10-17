@@ -1,6 +1,6 @@
 # User guide
 
-[README](../README.md) · [API](API.md) · [Linux setup](LINUX.md)
+[README](../README.md) · [API](API.md)
 
 ## Install and start
 
@@ -68,7 +68,7 @@ Its 24-hour chart follows history filters; retention is capped at 1,000 events, 
 History identifies accounts by alias and username.
 
 **Stop** closes the managed client. **Settings → General → Window** chooses tray minimization or full exit.
-Full exit leaves Roblox open and ends supervision; Linux uses taskbar minimization without a tray host.
+Full exit leaves Roblox open and ends supervision.
 The icon beside the version opens the latest two changelog entries.
 
 ## Server selection and joining together

@@ -42,7 +42,7 @@ Files were read individually with `git show`; no dev merge/cherry-pick or whole-
 
 | Component | Decision |
 |---|---|
-| CI, Linux and beta workflows | Port removal of write publishers, nonpersisted credentials, attempt-qualified artifacts and tests; add scoped hotfix admission |
+| CI and beta workflows | Port removal of write publishers, nonpersisted credentials, attempt-qualified artifacts and tests; add scoped hotfix admission |
 | release-promotion workflow | Port trusted workflow-run separation and serialization; add hard-disabled activation guard |
 | release_promotion.py | Port intent, owner, exact-source/check/artifact, Ruleset, bounded archive and idempotency controls; add schema 2 |
 | test-release-promotion.py | Port all 30 synthetic regressions, including unchanged feature/beta contracts |
@@ -58,7 +58,7 @@ Files were read individually with `git show`; no dev merge/cherry-pick or whole-
 1. Independently review this exact preparation head, source diff and both policy suites; retain `1.7.0` throughout.
 2. Owner audits/cancels queued or running legacy privileged jobs and forbids reruns of pre-transition jobs/tags.
 3. Owner separately authorizes required repository protections below; keep publisher hard-disabled and variable false/unset.
-4. Review PR's Branch flow, Windows and both Linux-platform checks; merge only through reviewed PR, with no direct-push/bypass.
+4. Review PR's Branch flow and Windows checks; merge only through reviewed PR, with no direct-push/bypass.
 5. Confirm merged main has no stable/beta write job, unchanged version and no intent; ordinary completion events cannot publish.
 6. Complete disposable-repository permission/digest/immutability/rerun proof and independent security review.
 7. Only a later owner-approved activation PR may remove literal `false`; enable the variable only after verified controls and approval.
@@ -77,7 +77,7 @@ No setting was changed, and activation remains blocked.
 1. Audit owner/admins, collaborators, Apps, deploy keys, workflow-edit rights and repository secrets; keep build jobs free of production credentials.
 2. Set default Actions token to contents-read; disable write tokens/secrets for fork PRs.
 3. Create active branch Rulesets for `refs/heads/main` and `refs/heads/dev`: require PR, prevent force-push/deletion, require up-to-date branches.
-4. Require Branch flow, Windows checks, Linux checks and package (Ubuntu 24.04), Linux checks (Ubuntu), Linux checks (Arch), each from GitHub Actions App ID `15368`.
+4. Require Branch flow and Windows checks, each from GitHub Actions App ID `15368`.
 5. Use merge commits for hotfix promotion; keep branch bypass lists empty and separately review workflow/governance changes.
 6. Create stable tag Ruleset `refs/tags/v*`: restrict updates/deletion, empty bypass list, permit initial publisher tag creation.
 7. Create separate beta tag Ruleset `refs/tags/beta-v*`: restrict creation/update/deletion; creation bypass only sole trusted owner/admin role (`RepositoryRole=5`, `always`).
@@ -143,7 +143,7 @@ Published corrections require a new patch; partial drafts with mismatched receip
 - [ ] Review both intent schemas, UUID freshness, merge parents/tree, full patch blobs and dependency/prerequisite attestations.
 - [ ] Check each commit and net diff for hidden/reverted Premium changes and unrelated refactors.
 - [ ] Trace build-token isolation, trusted checkout, redirects, archive bounds, source-tree hashes and payload checksum sets.
-- [ ] Exercise missing/failed Windows/Linux evidence, stale/replayed events/tags, races, interrupted uploads and consumed receipts.
+- [ ] Exercise missing/failed Windows evidence, stale/replayed events/tags, races, interrupted uploads and consumed receipts.
 - [ ] Review legacy queued/rerun/tag fencing and hard-disabled migration with no 1.7.1 metadata or intent.
 - [ ] Independently inspect all active Rulesets/bypasses, token permissions, native immutability and activation evidence.
 - [ ] Keep activation blocked until real least-privilege/digest/immutable-draft proof succeeds; no production release for testing.
@@ -152,7 +152,7 @@ Remaining trust includes GitHub/hosted runners, trusted owner/default-branch gov
 Pattern checks and review attestations cannot establish arbitrary program semantics or reproducible binary provenance.
 API check/write races cannot be made atomic; final rechecks and native protections narrow that risk.
 
-## Validation evidence
+## Upstream validation evidence (historical)
 
 | Local check | Result |
 |---|---|
@@ -174,7 +174,6 @@ Local fixtures do not prove real publisher token permissions, artifact digest av
 ## Exact preparation file list
 
 - `.github/workflows/ci-release.yml`
-- `.github/workflows/linux.yml`
 - `.github/workflows/beta-release.yml`
 - `.github/workflows/release-promotion.yml`
 - `scripts/release_promotion.py`

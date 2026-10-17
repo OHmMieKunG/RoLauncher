@@ -1,8 +1,8 @@
 # Client compatibility and performance report
 
-Development build: **1.8.2-dev.6bec4ffd1d4a**, 2026-10-17.
+Development build: **1.8.3-dev.3a1e4940f9af**, 2026-10-17.
 Integrated upstream main: `193c465`; GitHub release publication remains disabled.
-Source/build/script fingerprint: `e7b7b65db062d3f7d7dbd3c2c91fd784c77b79f6665a2720e70f5f3b162c950f` (120 files).
+Source/build/script fingerprint: `69311b58fab251c02f42f1ee82cbe8c018ec44793c65c1bbf8a5d22713aa5b6d` (102 files).
 
 ## Read-only host inventory
 
@@ -19,7 +19,7 @@ Source/build/script fingerprint: `e7b7b65db062d3f7d7dbd3c2c91fd784c77b79f6665a27
 | Presentation tooling | Pinned official PresentMon 2.6.0; no live capture performed |
 | Observer tooling | Three scripts compiled with official Luau 0.743; no Studio execution |
 
-The fresh preflight only inspected installations and process metadata.
+The recorded preflight only inspected installations and process metadata.
 No live Roblox process was changed, launched, rejoined or terminated.
 Dedicated test accounts and an authorized experience remain unavailable.
 
@@ -65,8 +65,8 @@ Zero presentation events alone cannot establish rendering suppression.
 
 - 98 regular Rust tests passed; six tests are explicitly ignored by default.
 - Three isolated native Windows fixtures passed; they do not certify Roblox behavior.
-- 106 desktop assertions, native WinUI smoke and authenticated Rust/UI bridge passed.
-- Six report, three archive and six mocked beta-publication fixtures passed.
+- 107 desktop assertions, native WinUI smoke and authenticated Rust/UI bridge passed.
+- Six report, three archive and seven mocked beta-publication fixtures passed.
 - Upstream safeguards passed 30 promotion, 14 hotfix and 25 owner-evidence fixtures; nothing was published.
 - Native regular/semibold and executable-input font checks passed; inspected normal/small-window screenshots show corrected punctuation and readable labels.
 - Installer/update fixture passed checksum rejection, cancellation, exit handles, complete installation, restart and data preservation.
@@ -75,7 +75,9 @@ Zero presentation events alone cannot establish rendering suppression.
 
 Tests ran with the normal Windows user token for DPAPI and native UI access.
 Credential protection was not weakened.
-Linux runtime acceptance was not executed in this Windows environment.
+Windows 10/11 x64 is the only supported platform; Linux/Sober source adapters, desktop, CI, packaging and updates are removed.
+The production build script rejects non-Windows targets; remaining dependency versions are unchanged.
+The UI fixture initially sampled before its first compositor tick; it passed after adding a bounded progress wait.
 
 See [acceptance workflow](client-acceptance.md), [resource measurements](performance-benchmarks.md), [session reliability](session-reliability.md) and [rendering research](NO-RENDER-RESEARCH.md).
 Package integrity, exact source correspondence and packaged-shell startup are checked after packaging; local results are recorded in `target/client-manager-checks/verification.md`.

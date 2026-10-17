@@ -107,7 +107,7 @@ class HotfixTests(unittest.TestCase):
         faults = ('owner', 'branch', 'foreign', 'old-schema', 'baseline-tag', 'stale-baseline', 'unpublished',
                   'not-patch', 'patch-hash', 'extra-commit', 'nonlinear', 'unexpected-path', 'missing-patch',
                   'dependencies', 'premium-review', 'intent-plus-code', 'merge-parents', 'replayed',
-                  'dev-commit', 'governance-application', 'missing-windows', 'failed-linux', 'artifact-source',
+                  'dev-commit', 'governance-application', 'missing-windows', 'failed-windows', 'artifact-source',
                   'source-bytes', 'hidden-tag-bypass', 'missing-rules', 'dependency-upgrade')
         for fault in faults:
             with self.subTest(fault=fault):
@@ -132,7 +132,7 @@ class HotfixTests(unittest.TestCase):
                 if fault == 'replayed': api.history.append({'sha': '8' * 40})
                 if fault == 'governance-application': api.governance_files[0]['filename'] = 'src/identity_poc/mod.rs'
                 if fault == 'missing-windows': api.jobs = [j for j in api.jobs if j['name'] != 'Windows checks']
-                if fault == 'failed-linux': api.linux_jobs[0]['conclusion'] = 'failure'
+                if fault == 'failed-windows': api.jobs[1]['conclusion'] = 'failure'
                 if fault == 'artifact-source': api.artifacts[0]['workflow_run']['head_sha'] = '8' * 40
                 if fault == 'source-bytes': api.source_tree['tree'][0]['sha'] = '0' * 40
                 if fault == 'hidden-tag-bypass': api.tag_rules.pop('bypass_actors')
@@ -156,7 +156,7 @@ class HotfixTests(unittest.TestCase):
 
     def test_migration_workflows_cannot_publish_even_with_existing_activation_variable(self):
         root = Path(__file__).resolve().parent.parent
-        for file in ('ci-release.yml', 'linux.yml', 'beta-release.yml'):
+        for file in ('ci-release.yml', 'beta-release.yml'):
             workflow = (root / '.github/workflows' / file).read_text()
             self.assertNotIn('contents: write', workflow)
             self.assertNotIn('scripts/publish-', workflow)

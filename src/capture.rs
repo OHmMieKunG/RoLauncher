@@ -198,51 +198,7 @@ fn capture_window(hwnd: windows_sys::Win32::Foundation::HWND, pid: u32) -> Optio
     }
 }
 
-#[cfg(target_os = "linux")]
-fn capture(identity: &ProcessIdentity) -> Option<Vec<u8>> {
-    use std::{
-        io::Read,
-        process::{Command, Stdio},
-        time::{Duration, Instant},
-    };
-    // X11/XWayland requires a host PID reported by XRes, not the ambiguous
-    // sandbox-local _NET_WM_PID. Native Wayland windows may refuse capture.
-    let mut child = Command::new("python3")
-        .args([
-            "-c",
-            include_str!("../scripts/capture-linux.py"),
-            &identity.pid.to_string(),
-        ])
-        .stdin(Stdio::null())
-        .stdout(Stdio::piped())
-        .stderr(Stdio::null())
-        .spawn()
-        .ok()?;
-    let stdout = child.stdout.take()?;
-    let reader = std::thread::spawn(move || {
-        let mut bytes = Vec::new();
-        let _ = stdout.take(8 * 1024 * 1024 + 1).read_to_end(&mut bytes);
-        bytes
-    });
-    let deadline = Instant::now() + Duration::from_secs(3);
-    let success = loop {
-        match child.try_wait() {
-            Ok(Some(status)) => break status.success(),
-            Err(_) => break false,
-            _ => {}
-        }
-        if Instant::now() >= deadline {
-            let _ = child.kill();
-            let _ = child.wait();
-            break false;
-        }
-        std::thread::sleep(Duration::from_millis(20));
-    };
-    let bytes = reader.join().ok()?;
-    (success && bytes.starts_with(b"\x89PNG\r\n\x1a\n")).then_some(bytes)
-}
-
-#[cfg(not(any(windows, target_os = "linux")))]
+#[cfg(not(windows))]
 fn capture(_: &ProcessIdentity) -> Option<Vec<u8>> {
     None
 }

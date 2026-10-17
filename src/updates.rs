@@ -113,10 +113,7 @@ fn parse_release(repo: &str, value: Release, include_beta: bool) -> Result<Updat
     };
     let download_url = asset(package_suffix())?;
     let checksums_url = asset("SHA256SUMS.txt")?;
-    #[cfg(not(target_os = "linux"))]
     let installer_url = asset("setup-x64.exe")?;
-    #[cfg(target_os = "linux")]
-    let installer_url = String::new();
     Ok(UpdateView {
         available: newer_than_current(number, env!("CARGO_PKG_VERSION"))?,
         version: release_version,
@@ -128,11 +125,7 @@ fn parse_release(repo: &str, value: Release, include_beta: bool) -> Result<Updat
     })
 }
 fn package_suffix() -> &'static str {
-    if cfg!(target_os = "linux") {
-        "linux-x64.tar.gz"
-    } else {
-        "windows-x64.zip"
-    }
+    "windows-x64.zip"
 }
 fn select_release(repo: &str, releases: Vec<Release>) -> Result<UpdateView, String> {
     // Compare numeric versions rather than GitHub publication order. Prefer a stable
@@ -303,14 +296,11 @@ mod tests {
         let view = parse_release("owner/repo", make(), false).unwrap();
         assert!(view.available);
         assert_eq!(view.version, "1.10.0");
-        #[cfg(not(target_os = "linux"))]
         assert!(
             view.installer_url
                 .ends_with("rolauncher-v1.10.0-setup-x64.exe")
         );
         assert!(view.download_url.ends_with(package_suffix()));
-        #[cfg(target_os = "linux")]
-        assert!(view.installer_url.is_empty());
         assert_eq!(repository_or_default(""), DEFAULT_REPOSITORY);
         assert!(version("1.10.0").unwrap() > version("1.9.9").unwrap());
         assert!(version("1.1.0-beta").is_err());

@@ -92,8 +92,8 @@ def run_identity(run):
     return {k: run[k] for k in ('id', 'run_attempt', 'head_sha', 'path', 'event', 'head_branch')}
 
 
-def binding_for(intent, run, linux, receipt):
-    return dict(intent=intent, source=run_identity(run), linux=run_identity(linux) if linux else None,
+def binding_for(intent, run, receipt):
+    return dict(intent=intent, source=run_identity(run),
                 receipt_sha256=hashlib.sha256(receipt).hexdigest())
 
 
@@ -260,12 +260,10 @@ def check_challenge(c, policy, now=None):
     require(type(c['created']) is int and type(c['deadline']) is int and c['deadline'] == c['created'] + WAIT
             and c['created'] <= now + 5 and now <= c['deadline'], 'Challenge expired')
     b = c['binding']
-    require(set(b) == {'intent', 'source', 'linux', 'receipt_sha256'}
+    require(set(b) == {'intent', 'source', 'receipt_sha256'}
             and re.fullmatch('[a-f0-9]{64}', b['receipt_sha256']), 'Challenge source contract')
-    for run in (b['source'], b['linux']):
-        if run is None:
-            continue
-        require(set(run) == {'id', 'run_attempt', 'head_sha', 'path', 'event', 'head_branch'}
+    run = b['source']
+    require(isinstance(run, dict) and set(run) == {'id', 'run_attempt', 'head_sha', 'path', 'event', 'head_branch'}
                 and all(type(run[k]) is int and run[k] > 0 for k in ('id', 'run_attempt'))
                 and re.fullmatch('[a-f0-9]{40}', run['head_sha']) and run['event'] == 'push', 'Challenge source run')
 

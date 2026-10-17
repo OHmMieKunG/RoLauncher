@@ -39,7 +39,6 @@ with zipfile.ZipFile(dist / f"{name}-source.zip") as source:
                      "docs/client-acceptance.md", "docs/client-compatibility-report.md", "docs/client-compatibility-report.json",
                      "src/updates.rs", "desktop/MainWindow.Management.cs", "desktop/MainWindow.Workspace.cs",
                      "desktop/MainWindow.xaml", "desktop/MainWindow.xaml.cs", "desktop/BulkDraft.cs",
-                     "scripts/sober-isolation/options.json", "desktop.linux/MainWindow.Smoke.cs",
                      f"docs/RELEASE-{core(version)}.md", "docs/VALIDATION.md", "docs/API.md", "docs/USAGE.md",
                      "docs/DEVELOPMENT.md", "docs/PERFORMANCE.md", "desktop/packages.lock.json",
                      "desktop.tests/packages.lock.json", "desktop/RoLauncher.Desktop.csproj",
@@ -49,20 +48,10 @@ with zipfile.ZipFile(dist / f"{name}-source.zip") as source:
                      "desktop/MainWindow.Updates.cs", "desktop/UpdateDownloader.cs", "desktop/UpdateHandoff.cs", "CHANGELOG.md"]:
         assert filename in paths, filename
         assert source.read(paths[filename]) == (root / filename).read_bytes(), filename
-    for filename in ["desktop.linux/RoLauncher.Linux.csproj", "desktop.linux/packages.lock.json",
-                     "desktop.linux/MainWindow.Platform.cs", "desktop/Bootstrap.cs", "desktop/MainWindow.Platform.cs",
-                     "src/platform_linux.rs", "src/login_linux.rs", "src/ui_linux.rs", "docs/LINUX.md",
-                     "scripts/build-linux.sh", "scripts/package-linux.py", "scripts/login-linux.py",
-                     "scripts/message-linux.py", "scripts/apply-update-linux.py", "scripts/install-linux.py",
-                     "scripts/test-linux-update.py", "scripts/ui-smoke-linux.py", "scripts/verify-linux-package.py",
-                     "scripts/publish-beta.py", "scripts/test-publish-beta.py", ".github/workflows/beta-release.yml", ".github/workflows/linux.yml"]:
-        assert filename in paths, filename
+    for filename in ["desktop/Bootstrap.cs", "desktop/MainWindow.Platform.cs", "scripts/publish-beta.py",
+                     "scripts/test-publish-beta.py", ".github/workflows/beta-release.yml"]:
         assert source.read(paths[filename]) == (root / filename).read_bytes(), filename
-    for file in (root / "desktop.linux").iterdir():
-        if file.is_file():
-            filename = "desktop.linux/" + file.name
-            assert filename in paths, filename
-            assert source.read(paths[filename]) == file.read_bytes(), filename
+    assert not any(p.startswith("desktop.linux/") or "_linux.rs" in p for p in paths)
     assert not any("/bin/" in p or "/obj/" in p or ".tools/" in p for p in paths)
     assert not any("__pycache__" in p.split("/") or p.endswith((".pyc", ".pyo")) for p in paths), "Source archive contains Python build caches"
     assert f'version = "{version}"'.encode() in source.read(paths["Cargo.toml"])

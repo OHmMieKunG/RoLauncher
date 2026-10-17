@@ -1,6 +1,6 @@
 {
   "schema": 1,
-  "generated_utc": "2026-10-17T14:46:17.729847+00:00",
+  "generated_utc": "2026-10-17T15:32:17.833512+00:00",
   "status": "BLOCKED",
   "cases": {
     "official_normal_headless": "BLOCKED",
@@ -98,7 +98,7 @@
     "live_tests": "BLOCKED"
   },
   "scope": "Preflight inventory is not a Roblox benchmark",
-  "development_build": "1.8.2-dev.6bec4ffd1d4a",
+  "development_build": "1.8.3-dev.3a1e4940f9af",
   "normal_graphics_policy": {
     "fps_cap": 120,
     "saved_quality": 10,
@@ -124,15 +124,15 @@
   "rendering_off": "UNSUPPORTED",
   "per_process_1_fps": "UNSUPPORTED",
   "live_tests_executed": false,
-  "code_tree_sha256": "e7b7b65db062d3f7d7dbd3c2c91fd784c77b79f6665a2720e70f5f3b162c950f",
-  "code_files_count": 120,
+  "code_tree_sha256": "69311b58fab251c02f42f1ee82cbe8c018ec44793c65c1bbf8a5d22713aa5b6d",
+  "code_files_count": 102,
   "regression_evidence": {
     "rust_regular_passed": 98,
     "rust_ignored_by_default": 6,
-    "desktop_assertions_passed": 106,
+    "desktop_assertions_passed": 107,
     "native_fixture_tests_passed": 3,
     "python_report_fixtures_passed": 6,
-    "native_ui_smoke": "PASSED",
+    "native_ui_smoke": "PASSED_AFTER_BOUNDED_COMPOSITOR_WAIT",
     "authenticated_ui_bridge": "PASSED",
     "installer_fixture": "PASSED",
     "clippy": "PASSED",
@@ -141,8 +141,14 @@
     "upstream_hotfix_fixtures_passed": 14,
     "upstream_owner_evidence_fixtures_passed": 25,
     "native_typography": "PASSED",
-    "linux_update_archive_fixtures_passed": 3
+    "python_beta_publication_fixtures_passed": 7,
+    "non_windows_build_guard": "PASSED",
+    "workflow_structure": "PASSED_WINDOWS_ONLY"
   },
   "upstream_main": "193c465",
-  "optimization_scope": "Launcher full-state sampling read moved from 100 ms ticks to two-second samples; no Roblox savings measured"
+  "optimization_scope": "Launcher full-state sampling read moved from 100 ms ticks to two-second samples; no Roblox savings measured",
+  "supported_platforms": [
+    "windows-x64"
+  ],
+  "linux_support": "REMOVED"
 }
