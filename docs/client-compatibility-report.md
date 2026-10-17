@@ -1,8 +1,8 @@
 # Client compatibility and performance report
 
-Development build: **1.8.1-dev.4f6ebf3c5023**, 2026-10-17.
-HEAD: `4daae1bfc14db1336e1366134367ccb16efb7d4d`; existing uncommitted work preserved.
-Source/build/script fingerprint: `7fbc1a5968daf1c3ffd39c991926a7ea62fcef48df2e9ae2cd6781d06b21268a` (113 files).
+Development build: **1.8.2-dev.6bec4ffd1d4a**, 2026-10-17.
+Integrated upstream main: `193c465`; GitHub release publication remains disabled.
+Source/build/script fingerprint: `e7b7b65db062d3f7d7dbd3c2c91fd784c77b79f6665a2720e70f5f3b162c950f` (120 files).
 
 ## Read-only host inventory
 
@@ -15,7 +15,7 @@ Source/build/script fingerprint: `7fbc1a5968daf1c3ffd39c991926a7ea62fcef48df2e9a
 | Fishstrap | 3.1.2; both Roblox protocols point to Fishstrap.exe |
 | Roblox player found | Fishstrap distribution, file version 0.743.0.7431134 |
 | Official / Bloxstrap | Not found in inspected standard roots; launches not attempted |
-| Active processes at preflight | One Roblox player and one launcher; ownership, game progress and mode unverified |
+| Active processes at preflight | Three Roblox players and one launcher; ownership, game progress and mode unverified |
 | Presentation tooling | Pinned official PresentMon 2.6.0; no live capture performed |
 | Observer tooling | Three scripts compiled with official Luau 0.743; no Studio execution |
 
@@ -40,6 +40,9 @@ Headless activity temporarily shows the window only after 60 seconds without des
 Busy desktops and denied focus can defer activity beyond Roblox's idle timeout; no prevention guarantee is made.
 Normal accounts retain their existing 120 FPS/quality 10 settings; reduced Headless GPU or RAM use has not been measured.
 
+Routine full-state reads now follow two-second samples instead of every 100 ms; window/input cancellation checks retain the faster cadence.
+This removes redundant launcher state copies; no Roblox savings or CPU percentage is inferred.
+
 ## Roblox measurements
 
 | Condition | CPU / working/private RAM / GPU / frames / restore latency |
@@ -62,13 +65,15 @@ Zero presentation events alone cannot establish rendering suppression.
 
 - 98 regular Rust tests passed; six tests are explicitly ignored by default.
 - Three isolated native Windows fixtures passed; they do not certify Roblox behavior.
-- 104 desktop assertions, native WinUI smoke and authenticated Rust/UI bridge passed.
-- Six report, three archive and six mocked publication fixtures passed.
+- 106 desktop assertions, native WinUI smoke and authenticated Rust/UI bridge passed.
+- Six report, three archive and six mocked beta-publication fixtures passed.
+- Upstream safeguards passed 30 promotion, 14 hotfix and 25 owner-evidence fixtures; nothing was published.
+- Native regular/semibold and executable-input font checks passed; inspected normal/small-window screenshots show corrected punctuation and readable labels.
 - Installer/update fixture passed checksum rejection, cancellation, exit handles, complete installation, restart and data preservation.
 - Strict all-target Clippy, formatting, release metadata and offline adapter checks passed.
 - Updated observer scripts compiled; Roblox input acceptance and DataStore behavior were not tested.
 
-The sandboxed Rust run had 32 DPAPI encryption failures (Windows error 2); the isolated suite passed with the normal Windows user token.
+Tests ran with the normal Windows user token for DPAPI and native UI access.
 Credential protection was not weakened.
 Linux runtime acceptance was not executed in this Windows environment.
 

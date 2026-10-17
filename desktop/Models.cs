@@ -50,9 +50,15 @@ public sealed class AccountRow(Account account) : INotifyPropertyChanged
 {
     public Account Account { get; private set; } = account;
     private RuntimeControls? _runtime;
-    public string ResourceSummary => $"CPU {(_runtime?.CpuPercent is { } cpu ? $"{cpu:F1}%" : "unavailable")} | Working set {(_runtime?.WorkingSetBytes is { } memory ? $"{memory / 1048576.0:F1} MiB" : "unavailable")} | Private {(_runtime?.PrivateBytes is { } allocation ? $"{allocation / 1048576.0:F1} MiB" : "unavailable")} | Page faults {(_runtime?.PageFaultsPerSecond is { } faults ? $"{faults:F1}/s (includes soft faults)" : "unavailable")} | GPU {(_runtime?.GpuPercent is { } gpu ? $"{gpu:F1}% ({_runtime.GpuEngine})" : "unavailable")}";
+    public string ResourceSummary => $"CPU {(_runtime?.CpuPercent is { } cpu ? $"{cpu:F1}%" : "unavailable")} | Working set {(_runtime?.WorkingSetBytes is { } memory ? $"{memory / 1048576.0:F1} MiB" : "unavailable")}\nPrivate {(_runtime?.PrivateBytes is { } allocation ? $"{allocation / 1048576.0:F1} MiB" : "unavailable")} | Page faults {(_runtime?.PageFaultsPerSecond is { } faults ? $"{faults:F1}/s (includes soft faults)" : "unavailable")}\nGPU {(_runtime?.GpuPercent is { } gpu ? $"{gpu:F1}% ({_runtime.GpuEngine})" : "unavailable")}";
     public string ControlSummary => _runtime is null ? "No verified process measurements" : $"{_runtime.ResourceResult}\n{_runtime.InputResult}\nActivity attempted: {_runtime.LastActivityAttemptAt?.ToLocalTime().ToString("T") ?? "never"} | OS input submitted: {_runtime.LastInputSubmittedAt?.ToLocalTime().ToString("T") ?? "never"}\nSample: {_runtime.SampledAt?.ToLocalTime():T}\n{string.Join("; ", _runtime.Unavailable ?? [])}";
-    public string ClientSummary => $"{Account.ClientOptions.Bootstrapper} | requested {Account.ClientOptions.Mode} | {(_runtime?.ClientMode is { } mode ? $"observed {mode}" : "mode unverified")} | {Account.ResourceOptions.Mode}";
+    private static string ClientLabel(string value) => value switch
+    {
+        "system" => "Auto-detect", "official" => "Official Roblox", "bloxstrap" => "Bloxstrap", "fishstrap" => "Fishstrap",
+        "custom" => "Custom", "normal" => "Normal", "headless" => "Headless", "network_only" => "Network-only",
+        "balanced" => "Balanced", "low_resource" => "Low Resource", _ => value
+    };
+    public string ClientSummary => $"{ClientLabel(Account.ClientOptions.Bootstrapper)} | requested {ClientLabel(Account.ClientOptions.Mode)} | {(_runtime?.ClientMode is { } mode ? $"observed {ClientLabel(mode)}" : "mode unverified")} | {(Account.ResourceOptions.Mode == "normal" ? "Default" : ClientLabel(Account.ResourceOptions.Mode))}";
     public string SessionSummary => $"Window: {_runtime?.WindowState ?? "unavailable"} | Process: {(_runtime?.ProcessUptimeSeconds is { } seconds ? FormatDuration(seconds) : "unavailable")} | Connection: {(Account.Status == "running" && Account.ConnectedSince is { } since ? FormatDuration((ulong)Math.Max(0, (DateTimeOffset.UtcNow - since).TotalSeconds)) : "unverified")}\nRecovery attempts: {Account.ReconnectionAttempts} | Last disconnect: {Account.LastDisconnect?.ToLocalTime().ToString("g") ?? "none recorded"}";
     public void SetRuntime(RuntimeControls? runtime)
     {

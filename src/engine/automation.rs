@@ -54,7 +54,7 @@ impl Engine {
             }
             #[cfg(windows)]
             if environment.pump() {
-                let paused = self.snapshot().anti_afk_paused;
+                let paused = self.0.state.lock().unwrap().anti_afk_paused;
                 self.set_anti_afk_paused(!paused);
             }
             let now = Instant::now();
@@ -69,8 +69,7 @@ impl Engine {
                 let _ = self.0.events.send(snapshot(&state));
             }
             last_tick = now;
-            let view = self.snapshot();
-            if suspended || view.anti_afk_paused {
+            if suspended || self.0.state.lock().unwrap().anti_afk_paused {
                 deadlines.clear();
             }
             #[cfg(windows)]
@@ -136,6 +135,7 @@ impl Engine {
             }
             if now >= sample_at && !suspended {
                 sample_at = now + Duration::from_secs(2);
+                let view = self.snapshot();
                 #[cfg(windows)]
                 let gpu = if view
                     .accounts

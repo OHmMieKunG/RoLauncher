@@ -122,11 +122,13 @@ Check(clientCopy.ClientOptions == clientAccount.ClientOptions, "Per-account clie
 Check(account.ClientOptions.Mode == "normal", "Editing one account does not change another account's defaults.");
 Check(ResourceSettings.TryCreate("balanced", "", out _, out _), "Balanced is accepted by desktop validation.");
 var clientRow = new AccountRow(clientAccount);
+Check(clientRow.ClientSummary == "Fishstrap | requested Headless | mode unverified | Default", "Client settings display user-facing names while retaining unverified state.");
+Check(new AccountRow(account).ClientSummary.StartsWith("Auto-detect | requested Normal"), "Legacy settings use readable provider and mode names.");
 Check(clientRow.ClientSummary.Contains("mode unverified"), "A saved Headless request does not pretend it was applied.");
 clientRow.SetRuntime(new(new(1234), DateTimeOffset.UtcNow.AddMinutes(-1), 10, 1000, null, null, [], "old", "none", "unverified", "headless", "hidden"));
 Check(clientRow.ResourceSummary.Contains("unavailable") && clientRow.ClientSummary.Contains("mode unverified"), "Stale samples cannot claim Headless or current metrics.");
 clientRow.SetRuntime(new(new(1234), DateTimeOffset.UtcNow, 0, 1000, null, null, [], "verified", "none", "unverified", "headless", "hidden"));
-Check(clientRow.ClientSummary.Contains("observed headless"), "Observed mode is independent of the requested preference.");
+Check(clientRow.ClientSummary.Contains("observed Headless"), "Observed mode is independent of the requested preference.");
 var detectedFish = new BootstrapperInstallation("system", @"C:\Fishstrap\Fishstrap.exe", null, true, "");
 Check(detectedFish.AutoLabel == "Auto-detect (Fishstrap)", "Auto-detect names the registered Fishstrap launcher.");
 Check((detectedFish with { Executable = @"C:\Bloxstrap\BLOXSTRAP.EXE" }).AutoLabel == "Auto-detect (Bloxstrap)", "Detection is case insensitive.");

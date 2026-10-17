@@ -1,4 +1,4 @@
-# RoLauncher 1.8.1-dev.4f6ebf3c5023
+# RoLauncher 1.8.2-dev.6bec4ffd1d4a
 
 Development source based on published stable 1.7.0, targeting the next feature release.
 Adds per-account background client modes, provider selection, reversible resource profiles and monitoring in the existing launcher.
@@ -39,7 +39,7 @@ Keep cookies private; never include them in bug reports.
 - Optional beta updates under **Settings → Updates**.
 
 Headless retains the actual Roblox client; it does not prove rendering stops.
-Network-only remains unsupported. See [upcoming changes](docs/RELEASE-1.8.1.md) and [feasibility research](docs/network-only-feasibility.md).
+Network-only remains unsupported. See [upcoming changes](docs/RELEASE-1.8.2.md) and [feasibility research](docs/network-only-feasibility.md).
 
 ## Documentation
 

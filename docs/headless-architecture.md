@@ -87,7 +87,7 @@ The [acceptance harness](client-acceptance.md) is compiled only for explicit Win
 It reuses verified process controls and the local API, separates six baseline benchmark conditions, and requires independent server evidence before any live pass.
 [Current host and blocked cases](client-compatibility-report.md) remain separate from automated fixture results.
 
-## 1.8.1 activity and measurement upgrade
+## Activity and measurement
 
 Headless foreground activity is separately opt-in and uses the existing 100 ms worker, verified process handle and asynchronous window restoration.
 The worker serializes activity, observes temporary visibility, rechecks cancellation before input, and keeps captured process/window originals intact.

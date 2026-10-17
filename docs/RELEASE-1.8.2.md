@@ -1,6 +1,6 @@
-# RoLauncher 1.8.1
+# RoLauncher 1.8.2
 
-Upcoming / Unreleased â€” changes since published stable 1.7.0.
+Upcoming / Unreleased — changes since published stable 1.7.0.
 
 - Configure Normal/Headless per account and restore managed windows without rejoining.
 - Select an installed protocol, Official, Bloxstrap, Fishstrap or trusted custom provider independently for future launches and recovery.

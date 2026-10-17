@@ -26,6 +26,7 @@ These controls do not free private allocation or disable rendering; no forced wo
 - Per-process GPU engines can overlap; total device GPU usage is unavailable rather than an invalid sum.
 - Disabled monitoring skips account sampling; absent, first CPU, denied and stale measurements remain unavailable.
 - Aggregate CPU/RAM reports the measured subset and its count; it never estimates missing clients.
+- Routine full-state reads follow the two-second sampling cycle; window transitions and activity cancellation retain their 100 ms checks.
 - Process control runs outside the application state lock; process-image installation roots are cached.
 
 ## Reproducible live procedure
@@ -44,7 +45,7 @@ Keep API bearer tokens in memory and omit authenticated URIs, tickets, cookies a
 
 See [architecture](headless-architecture.md), [session reliability](session-reliability.md) and [existing performance notes](PERFORMANCE.md).
 
-## 1.8.1 isolated experiments
+## Isolated experiments
 
 Normal peers keep their existing 120 FPS cap and graphics quality 10; do not lower shared settings during these runs.
 Add `headless_ecoqos_off` and `headless_ignore_timer` to the six baseline conditions, with three rotated blocks and manual interaction between blocks.

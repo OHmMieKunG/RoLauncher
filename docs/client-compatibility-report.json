@@ -1,6 +1,6 @@
 {
   "schema": 1,
-  "generated_utc": "2026-10-17T14:06:19.787652+00:00",
+  "generated_utc": "2026-10-17T14:46:17.729847+00:00",
   "status": "BLOCKED",
   "cases": {
     "official_normal_headless": "BLOCKED",
@@ -28,11 +28,19 @@
     "active_processes": [
       {
         "name": "RobloxPlayerBeta",
+        "pid": 6208
+      },
+      {
+        "name": "RobloxPlayerBeta",
+        "pid": 6412
+      },
+      {
+        "name": "RobloxPlayerBeta",
         "pid": 14552
       },
       {
         "name": "RoLauncher",
-        "pid": 14844
+        "pid": 8352
       }
     ],
     "windows": {
@@ -85,13 +93,12 @@
         "version": "0, 743, 0, 7431134"
       }
     ],
-    "utc": "2026-10-17T14:06:19.3952618Z",
+    "utc": "2026-10-17T14:46:17.1478345Z",
     "missing": [],
     "live_tests": "BLOCKED"
   },
   "scope": "Preflight inventory is not a Roblox benchmark",
-  "development_build": "1.8.1-dev.4f6ebf3c5023",
-  "head": "4daae1bfc14db1336e1366134367ccb16efb7d4d",
+  "development_build": "1.8.2-dev.6bec4ffd1d4a",
   "normal_graphics_policy": {
     "fps_cap": 120,
     "saved_quality": 10,
@@ -117,18 +124,25 @@
   "rendering_off": "UNSUPPORTED",
   "per_process_1_fps": "UNSUPPORTED",
   "live_tests_executed": false,
-  "code_tree_sha256": "7fbc1a5968daf1c3ffd39c991926a7ea62fcef48df2e9ae2cd6781d06b21268a",
-  "code_files_count": 113,
+  "code_tree_sha256": "e7b7b65db062d3f7d7dbd3c2c91fd784c77b79f6665a2720e70f5f3b162c950f",
+  "code_files_count": 120,
   "regression_evidence": {
     "rust_regular_passed": 98,
     "rust_ignored_by_default": 6,
-    "desktop_assertions_passed": 104,
+    "desktop_assertions_passed": 106,
     "native_fixture_tests_passed": 3,
     "python_report_fixtures_passed": 6,
     "native_ui_smoke": "PASSED",
     "authenticated_ui_bridge": "PASSED",
     "installer_fixture": "PASSED",
     "clippy": "PASSED",
-    "observer_scripts": "COMPILED_ONLY"
-  }
+    "observer_scripts": "COMPILED_ONLY",
+    "upstream_promotion_fixtures_passed": 30,
+    "upstream_hotfix_fixtures_passed": 14,
+    "upstream_owner_evidence_fixtures_passed": 25,
+    "native_typography": "PASSED",
+    "linux_update_archive_fixtures_passed": 3
+  },
+  "upstream_main": "193c465",
+  "optimization_scope": "Launcher full-state sampling read moved from 100 ms ticks to two-second samples; no Roblox savings measured"
 }

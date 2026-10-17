@@ -1,4 +1,4 @@
-1.8.1 ? Upcoming release
+1.8.2 — Upcoming release
 
 Added
 

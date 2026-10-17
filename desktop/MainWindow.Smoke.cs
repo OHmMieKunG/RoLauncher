@@ -234,6 +234,8 @@ public sealed partial class MainWindow
             DialogClientMode.SelectedIndex = 1;
             DialogBootstrapper.SelectedIndex = 1;
             DialogExecutable.Text = @"C:\Fixture\RobloxPlayerBeta.exe";
+            Root.UpdateLayout();
+            AssertInputTypography(DialogExecutable);
             await RefreshBootstrapperDetectionAsync();
             Assert(DialogBootstrapper.SelectedIndex == 1 && DialogExecutable.Text == @"C:\Fixture\RobloxPlayerBeta.exe",
                 "Refreshing launcher detection preserves an explicit provider and executable override.");
