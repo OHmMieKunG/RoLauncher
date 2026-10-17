@@ -26,6 +26,12 @@ fn text_valid(value: &str, empty: bool) -> bool {
         && !value.chars().any(char::is_control)
 }
 pub(super) fn validate_patch(p: &AccountPatch) -> Result<(), String> {
+    if let Some(client) = &p.client {
+        client.validate()?;
+    }
+    if let Some(resource) = &p.resource {
+        resource.validate()?;
+    }
     if p.game_profile_id.is_some() && (p.target.is_none() || p.clear_target) {
         return Err("Choose a saved game together with its destination".into());
     }
@@ -55,6 +61,15 @@ pub(super) fn validate_game_assignment(db: &Database, p: &AccountPatch) -> Resul
     Ok(())
 }
 pub(super) fn apply_patch(a: &mut Account, p: AccountPatch) {
+    if let Some(client) = p.client {
+        a.client = client;
+    }
+    if let Some(resource) = p.resource {
+        a.resource = resource;
+    }
+    if let Some(anti_afk) = p.anti_afk {
+        a.anti_afk = anti_afk;
+    }
     if let Some(alias) = p.alias {
         a.alias = alias;
     }
@@ -111,6 +126,31 @@ fn expand_alias(value: &str, a: &Account, index: usize) -> String {
 }
 
 impl Engine {
+    /// Acknowledges a preference request; runtime_controls reports actual application separately.
+    pub fn client_mode(&self, id: &str, action: &str) -> Result<Account, String> {
+        let mode = match action {
+            "hide" | "headless" => crate::client::ClientMode::Headless,
+            "restore" | "normal" => crate::client::ClientMode::Normal,
+            "network_only" => return Err(crate::client::NETWORK_ONLY_REASON.into()),
+            _ => return Err("Unsupported client mode action".into()),
+        };
+        #[cfg(not(windows))]
+        {
+            let _ = (id, mode);
+            Err("Live client mode switching requires Windows".into())
+        }
+        #[cfg(windows)]
+        self.transaction(|s| {
+            let account = account_mut(s, id)?;
+            account.client.mode = mode;
+            account.client.auto_hide = false;
+            if mode == crate::client::ClientMode::Normal {
+                // Restore requests remove minimization while preserving explicit affinity.
+                account.resource.mode = crate::resource::ResourceMode::Normal;
+            }
+            Ok(account.clone())
+        })
+    }
     pub fn set_game_settings(
         &self,
         selection: ServerSelection,
@@ -280,10 +320,13 @@ impl Engine {
                         .ok_or("Every profile account needs a destination")?;
                     target.validate()?;
                     Ok(ProfileEntry {
+                        client: a.client.clone(),
                         account_id: id.clone(),
                         alias: a.alias.clone(),
                         target: Some(target),
                         game_profile_id: a.game_profile_id,
+                        resource: a.resource.clone(),
+                        anti_afk: a.anti_afk.clone(),
                         auto_recovery: a.auto_recovery,
                         fallback_policy: a.fallback_policy,
                         group: a.group.clone(),
@@ -334,9 +377,12 @@ impl Engine {
                 apply_patch(
                     a,
                     AccountPatch {
+                        client: Some(entry.client),
                         alias: Some(entry.alias),
                         target: entry.target,
                         game_profile_id,
+                        resource: Some(entry.resource),
+                        anti_afk: Some(entry.anti_afk),
                         auto_recovery: Some(entry.auto_recovery),
                         fallback_policy: Some(entry.fallback_policy),
                         group: Some(entry.group),
@@ -466,6 +512,9 @@ pub(super) fn validate_profile(p: &LaunchProfile) -> Result<(), String> {
     for e in &p.entries {
         let target = e.target.clone().ok_or("Profile destination missing")?;
         validate_patch(&AccountPatch {
+            client: Some(e.client.clone()),
+            resource: Some(e.resource.clone()),
+            anti_afk: Some(e.anti_afk.clone()),
             alias: Some(e.alias.clone()),
             target: Some(target),
             group: Some(e.group.clone()),

@@ -1,0 +1,9 @@
+{
+  "base_url": "http://127.0.0.1:38472/",
+  "account_ids": ["REPLACE_FIRST_ID", "REPLACE_SECOND_ID"],
+  "place_id": 0,
+  "scenario": "switches",
+  "output": "C:\\RoLauncher\\target\\fishstrap-switches-001",
+  "presentmon": null,
+  "authorized_test_experience": false
+}

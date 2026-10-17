@@ -14,3 +14,6 @@ accounts*.tmp
 *.rolbackup
 *.rbxbackup
 **/__pycache__/
+
+/artifacts/
+/upstream/

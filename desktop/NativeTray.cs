@@ -8,13 +8,14 @@ internal sealed class NativeTray : IDisposable
     private const uint Callback = 0x8004;
     private readonly nint _hwnd;
     private readonly SubclassProc _callback;
-    private readonly Action _open, _exit;
+    private readonly Action _open, _exit, _pause;
+    private readonly Func<bool> _paused;
     private NotifyIconData _icon;
     private readonly nint _appIcon;
 
-    public NativeTray(nint hwnd, Action open, Action exit)
+    public NativeTray(nint hwnd, Action open, Action exit, Action pause, Func<bool> paused)
     {
-        _hwnd = hwnd; _open = open; _exit = exit; _callback = Procedure;
+        _hwnd = hwnd; _open = open; _exit = exit; _pause = pause; _paused = paused; _callback = Procedure;
         _appIcon = LoadImageW(0, Path.Combine(AppContext.BaseDirectory, "RoLauncher.ico"), 1, 32, 32, 0x10);
         _icon = new NotifyIconData
         {
@@ -42,11 +43,12 @@ internal sealed class NativeTray : IDisposable
             {
                 var menu = CreatePopupMenu();
                 AppendMenuW(menu, 0, 1, "Open RoLauncher");
+                AppendMenuW(menu, 0, 3, _paused() ? "Resume Anti-AFK" : "Pause Anti-AFK");
                 AppendMenuW(menu, 0, 2, "Exit (leave clients running)");
                 GetCursorPos(out var point); SetForegroundWindow(hwnd);
                 var choice = TrackPopupMenu(menu, 0x0100 | 0x0080, point.X, point.Y, 0, hwnd, 0);
                 DestroyMenu(menu);
-                if (choice == 1) _open(); else if (choice == 2) _exit();
+                if (choice == 1) _open(); else if (choice == 2) _exit(); else if (choice == 3) _pause();
             }
             return 0;
         }

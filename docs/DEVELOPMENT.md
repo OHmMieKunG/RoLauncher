@@ -62,3 +62,6 @@ Alternate output: `-OutputRootDirectory FOLDER` and verifier `--dist-directory F
 Existing artifacts are never overwritten. The installer is unsigned.
 
 [Validation](VALIDATION.md) · [Performance](PERFORMANCE.md) · [API](API.md)
+
+[Live Roblox acceptance](client-acceptance.md) uses two dedicated accounts and an owned experience; its tests are never enabled by the normal test suite.
+Run `python scripts/test-client-report.py` for offline evidence fixtures without Roblox.

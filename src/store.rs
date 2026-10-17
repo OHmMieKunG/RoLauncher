@@ -43,6 +43,7 @@ impl Store {
         if !matches!(db.version, 1 | 2) {
             return Err("Unsupported account database version".into());
         }
+        validate_resource_settings(&db)?;
         Ok(db)
     }
     pub fn save(&self, database: &Database) -> Result<(), String> {
@@ -219,6 +220,7 @@ impl Store {
         if !db.discord.encrypted_webhook.is_empty() {
             crate::discord::validate_webhook(&platform::unprotect(&db.discord.encrypted_webhook)?)?;
         }
+        validate_resource_settings(&db)?;
         Ok(db)
     }
     /// Explicit offline recovery also works when the current JSON cannot be parsed.
@@ -252,6 +254,20 @@ fn valid_backup_name(name: &str) -> bool {
         && name
             .bytes()
             .all(|c| c.is_ascii_alphanumeric() || c == b'-' || c == b'.')
+}
+
+fn validate_resource_settings(db: &Database) -> Result<(), String> {
+    for saved in &db.accounts {
+        saved.account.client.validate()?;
+        saved.account.resource.validate()?;
+    }
+    for profile in &db.profiles {
+        for entry in &profile.entries {
+            entry.client.validate()?;
+            entry.resource.validate()?;
+        }
+    }
+    Ok(())
 }
 
 #[cfg(test)]

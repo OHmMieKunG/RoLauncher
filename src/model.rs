@@ -1,3 +1,4 @@
+use crate::resource::{AntiAfkSettings, ResourceSettings, RuntimeControls};
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
@@ -43,11 +44,17 @@ pub enum JoinType {
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct ProfileEntry {
+    #[serde(default)]
+    pub client: crate::client::ClientSettings,
     pub account_id: String,
     pub alias: String,
     pub target: Option<Target>,
     #[serde(default)]
     pub game_profile_id: Option<Uuid>,
+    #[serde(default)]
+    pub resource: ResourceSettings,
+    #[serde(default)]
+    pub anti_afk: AntiAfkSettings,
     pub auto_recovery: bool,
     pub fallback_policy: FallbackPolicy,
     pub group: String,
@@ -182,6 +189,8 @@ pub struct ProcessIdentity {
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct Account {
+    #[serde(default)]
+    pub client: crate::client::ClientSettings,
     pub id: String,
     pub username: String,
     pub alias: String,
@@ -189,6 +198,10 @@ pub struct Account {
     #[serde(default)]
     pub game_profile_id: Option<Uuid>,
     pub desired_running: bool,
+    #[serde(default)]
+    pub resource: ResourceSettings,
+    #[serde(default)]
+    pub anti_afk: AntiAfkSettings,
     pub auto_recovery: bool,
     pub status: Status,
     pub process: Option<ProcessIdentity>,
@@ -198,6 +211,10 @@ pub struct Account {
     pub ownership_deadline: Option<DateTime<Utc>>,
     pub failures: u32,
     pub next_retry: Option<DateTime<Utc>>,
+    #[serde(default)]
+    pub last_disconnect: Option<DateTime<Utc>>,
+    #[serde(default)]
+    pub reconnection_attempts: u64,
     pub connected_since: Option<DateTime<Utc>>,
     /// Managed run; disconnects and automatic rejoins do not reset it.
     #[serde(default)]
@@ -222,11 +239,14 @@ impl Account {
     pub fn new(id: String, username: String) -> Self {
         Self {
             alias: username.clone(),
+            client: crate::client::ClientSettings::default(),
             username,
             id,
             target: None,
             game_profile_id: None,
             desired_running: false,
+            resource: ResourceSettings::default(),
+            anti_afk: AntiAfkSettings::default(),
             auto_recovery: true,
             status: Status::Stopped,
             process: None,
@@ -234,6 +254,8 @@ impl Account {
             tracker: None,
             ownership_deadline: None,
             failures: 0,
+            last_disconnect: None,
+            reconnection_attempts: 0,
             next_retry: None,
             connected_since: None,
             running_since: None,
@@ -338,6 +360,12 @@ pub struct Operation {
 
 #[derive(Clone, Debug, Serialize)]
 pub struct Snapshot {
+    pub metrics: crate::resource::AggregateMetrics,
+    pub network_only_reason: &'static str,
+    pub runtime_controls: std::collections::BTreeMap<String, RuntimeControls>,
+    pub anti_afk_paused: bool,
+    pub session_suspended: bool,
+    pub no_render_reason: &'static str,
     pub server_selection: ServerSelection,
     pub join_type: JoinType,
     pub game_profiles: Vec<GameProfile>,
@@ -361,6 +389,21 @@ pub fn retry_seconds(failures: u32) -> Option<u64> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn old_accounts_and_presets_get_safe_resource_defaults() {
+        let mut account = serde_json::to_value(Account::new("1".into(), "fixture".into())).unwrap();
+        account.as_object_mut().unwrap().remove("resource");
+        account.as_object_mut().unwrap().remove("anti_afk");
+        account.as_object_mut().unwrap().remove("client");
+        let old: Account = serde_json::from_value(account).unwrap();
+        assert_eq!(old.resource, ResourceSettings::default());
+        assert!(!old.anti_afk.enabled);
+        assert_eq!(old.client, crate::client::ClientSettings::default());
+        let entry: ProfileEntry = serde_json::from_str(r#"{"account_id":"1","alias":"fixture","target":{"place_id":1},"auto_recovery":true,"fallback_policy":"stay","group":""}"#).unwrap();
+        assert_eq!(entry.resource, ResourceSettings::default());
+        assert_eq!(entry.client, crate::client::ClientSettings::default());
+        assert!(!entry.anti_afk.enabled);
+    }
     #[test]
     fn targets_reject_external_urls_and_conflicting_destinations() {
         let mut t = Target {

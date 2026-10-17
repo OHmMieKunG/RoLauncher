@@ -28,7 +28,7 @@ public sealed partial class MainWindow
             e.Cancel = true;
             appWindow.Hide();
         };
-        return new NativeTray(hwnd, () => { appWindow.Show(); Activate(); }, async () => await ExitAsync());
+        return new NativeTray(hwnd, () => { appWindow.Show(); Activate(); }, async () => await ExitAsync(), async () => await ToggleAntiAfkAsync(), () => _antiAfkPaused);
     }
 
     private void InitializePicker(object picker) => InitializeWithWindow.Initialize(picker, WindowNative.GetWindowHandle(this));

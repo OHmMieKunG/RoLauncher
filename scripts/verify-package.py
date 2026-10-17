@@ -31,7 +31,12 @@ with (dist / f"{name}-setup-x64.exe").open("rb") as installer:
 with zipfile.ZipFile(dist / f"{name}-source.zip") as source:
     assert source.testzip() is None
     paths = {p.replace("\\", "/"): p for p in source.namelist()}
-    for filename in ["Cargo.toml", "Cargo.lock", "AGENTS.md", "README.md", "src/engine/management.rs",
+    for filename in ["Cargo.toml", "Cargo.lock", "AGENTS.md", "global.json", "Directory.Build.props", "src/client.rs", "src/bootstrapper.rs", "src/resource.rs", "src/control_policy.rs", "src/controls.rs", "src/controls_windows.rs", "src/engine/automation.rs", "README.md", "src/engine/management.rs",
+                     "docs/headless-architecture.md", "docs/network-only-feasibility.md", "docs/bootstrapper-integration.md", "docs/session-reliability.md", "docs/performance-benchmarks.md",
+                     "src/client_acceptance.rs", "scripts/client-acceptance.ps1", "scripts/client-report.py", "scripts/test-client-report.py",
+                     "scripts/create-archive.py", "scripts/test-create-archive.py",
+                     "scripts/acceptance/config.example.json", "scripts/acceptance/observer.server.luau", "scripts/acceptance/observer.client.luau", "scripts/acceptance/export-observer.luau",
+                     "docs/client-acceptance.md", "docs/client-compatibility-report.md", "docs/client-compatibility-report.json",
                      "src/updates.rs", "desktop/MainWindow.Management.cs", "desktop/MainWindow.Workspace.cs",
                      "desktop/MainWindow.xaml", "desktop/MainWindow.xaml.cs", "desktop/BulkDraft.cs",
                      "scripts/sober-isolation/options.json", "desktop.linux/MainWindow.Smoke.cs",
@@ -59,6 +64,7 @@ with zipfile.ZipFile(dist / f"{name}-source.zip") as source:
             assert filename in paths, filename
             assert source.read(paths[filename]) == file.read_bytes(), filename
     assert not any("/bin/" in p or "/obj/" in p or ".tools/" in p for p in paths)
+    assert not any("__pycache__" in p.split("/") or p.endswith((".pyc", ".pyo")) for p in paths), "Source archive contains Python build caches"
     assert f'version = "{version}"'.encode() in source.read(paths["Cargo.toml"])
     assert re.search(r'name = "rolauncher"\s+version = "' + re.escape(version) + '"', source.read(paths["Cargo.lock"]).decode())
     assert source.read(paths["README.md"]).decode().startswith(f"# RoLauncher {version}")
@@ -76,7 +82,7 @@ with zipfile.ZipFile(dist / f"{name}-windows-x64.zip") as package:
     assert package.read(paths[f"{name}/AGENTS.md"]) == (root / "AGENTS.md").read_bytes()
     assert package.read(paths[f"{name}/README.md"]) == (root / "README.md").read_bytes()
     assert not any("/Assets/Fonts/" in p for p in paths), "Windows must use installed native fonts"
-    for filename in ["API.md", "USAGE.md", "DEVELOPMENT.md", "PERFORMANCE.md"]:
+    for filename in ["API.md", "USAGE.md", "DEVELOPMENT.md", "PERFORMANCE.md", "headless-architecture.md", "network-only-feasibility.md", "bootstrapper-integration.md", "session-reliability.md", "performance-benchmarks.md", "client-acceptance.md", "client-compatibility-report.md", "client-compatibility-report.json"]:
         assert package.read(paths[f"{name}/docs/{filename}"]) == (root / "docs" / filename).read_bytes()
     assert not any("RbxTools.Desktop" in p or p.endswith("/rbx-tools.exe") for p in paths)
     assert b"RbxTools" not in package.read(paths[f"{name}/desktop/RoLauncher.Desktop.dll"])
@@ -98,8 +104,8 @@ if args.smoke_shell:
         def do_POST(self):
             requests.append(self.path)
             assert self.path == "/v1/updates/official/check", self.path
-            self.respond(dict(repository="oangsa/RoLauncher", current_version=version, version=version,
-                              available=False, release_url=f"https://github.com/oangsa/RoLauncher/releases/tag/v{version}",
+            self.respond(dict(repository="OHmMieKunG/RoLauncher", current_version=version, version=version,
+                              available=False, release_url=f"https://github.com/OHmMieKunG/RoLauncher/releases/tag/v{version}",
                               download_url="", checksums_url="", installer_url=""))
         def do_GET(self):
             requests.append(self.path)

@@ -1,5 +1,20 @@
 # Changelog
 
+## [1.8.1] ? Unreleased
+
+### Added
+
+- Configure independent Normal/Headless modes and restore managed windows without rejoining.
+- Apply reversible Windows efficiency controls in Headless while preserving saved profiles and Normal graphics settings.
+- Choose per-account providers and Default/Balanced/Low Resource profiles, with persisted preferences and optional affinity.
+- Detect installed launchers and show the registered choice while preserving per-account overrides.
+- Monitor CPU, working set, private allocation, page faults, available GPU engines and separate process/connection uptime.
+- Launch, stop, hide or restore all accounts; retain preferences through presets and encrypted backups.
+- Opt into experimental Headless foreground activity while the PC is idle, with cancellation and bounded retries.
+- Keep Network-only unsupported; competing Bloxstrap/Fishstrap protocol registration remains unsupported.
+
+[Status and limits](docs/headless-architecture.md#delivery-status).
+
 Newest first; local builds use unique dev suffixes.
 1.0.0 was first public stable; earlier builds were local, and 1.1.0 was a Linux beta.
 [Validation and limits](docs/VALIDATION.md).

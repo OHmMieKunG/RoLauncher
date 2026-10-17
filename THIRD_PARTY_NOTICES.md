@@ -1,5 +1,7 @@
 # Third-party notices
 
+This development fork modifies the supplied RoLauncher v1.7.0 source and retains its GPL-3.0-only license and upstream notices. Prototype artifacts are preserved separately and are excluded from this source distribution.
+
 RoLauncher is distributed under GPL-3.0-only. Launch-protocol and tracker behavior, private access-code parsing, log-watcher concepts, and OS singleton coordination were referenced from Roblox Account Manager by ic3w0lf22 and contributors:
 
 - Repository: https://github.com/ic3w0lf22/Roblox-Account-Manager

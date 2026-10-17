@@ -17,6 +17,7 @@ use std::{
 use tokio::sync::{Notify, broadcast};
 use uuid::Uuid;
 
+mod automation;
 mod management;
 mod server_selection;
 pub use management::{BulkPatch, ProfileSave};
@@ -27,6 +28,9 @@ struct State {
     operations: BTreeMap<Uuid, Operation>,
     network_suspended: bool,
     compatibility: String,
+    runtime_controls: BTreeMap<String, crate::resource::RuntimeControls>,
+    anti_afk_paused: bool,
+    session_suspended: bool,
 }
 struct Inner {
     state: Mutex<State>,
@@ -36,6 +40,8 @@ struct Inner {
     wake: Notify,
     events: broadcast::Sender<Snapshot>,
     shutdown: AtomicBool,
+    session_suspended: AtomicBool,
+    automation: Mutex<Option<std::thread::JoinHandle<()>>>,
     launch_allowed: Arc<AtomicBool>,
     bot_generation: AtomicU64,
     discord: crate::discord::Discord,
@@ -101,9 +107,12 @@ fn attach_verified_player(account: &mut Account, identity: ProcessIdentity) {
 
 #[derive(Clone, Default, serde::Deserialize)]
 pub struct AccountPatch {
+    pub client: Option<crate::client::ClientSettings>,
     pub alias: Option<String>,
     pub target: Option<Target>,
     pub game_profile_id: Option<Uuid>,
+    pub resource: Option<crate::resource::ResourceSettings>,
+    pub anti_afk: Option<crate::resource::AntiAfkSettings>,
     pub auto_recovery: Option<bool>,
     pub fallback_policy: Option<FallbackPolicy>,
     pub group: Option<String>,
@@ -135,6 +144,13 @@ impl Engine {
         };
         for saved in &mut database.accounts {
             let a = &mut saved.account;
+            if a.client.start_on_open
+                && a.target.is_some()
+                && a.process.is_none()
+                && a.tracker.is_none()
+            {
+                a.desired_running = true;
+            }
             a.track_run(Utc::now());
             resume_after_confirmed_close(a);
             if a.desired_running && a.status != Status::NeedsAttention {
@@ -163,6 +179,9 @@ impl Engine {
                 operations: BTreeMap::new(),
                 network_suspended: false,
                 compatibility,
+                runtime_controls: BTreeMap::new(),
+                anti_afk_paused: false,
+                session_suspended: false,
             }),
             store,
             roblox: Roblox::new()?,
@@ -170,6 +189,8 @@ impl Engine {
             wake: Notify::new(),
             events,
             shutdown: AtomicBool::new(false),
+            session_suspended: AtomicBool::new(false),
+            automation: Mutex::new(None),
             bot_generation: AtomicU64::new(u64::from(bot_running)),
             launch_allowed,
             discord,
@@ -183,7 +204,9 @@ impl Engine {
     }
     pub fn snapshot(&self) -> Snapshot {
         let s = self.0.state.lock().unwrap();
-        snapshot(&s)
+        let mut view = snapshot(&s);
+        view.session_suspended = self.0.session_suspended.load(Ordering::Acquire);
+        view
     }
     pub fn subscribe(&self) -> broadcast::Receiver<Snapshot> {
         self.0.events.subscribe()
@@ -195,6 +218,9 @@ impl Engine {
         self.0.shutdown.store(true, Ordering::Release);
         self.0.discord.stop();
         self.0.wake.notify_waiters();
+        if let Some(worker) = self.0.automation.lock().unwrap().take() {
+            let _ = worker.join();
+        }
     }
     pub fn is_shutdown(&self) -> bool {
         self.0.shutdown.load(Ordering::Acquire)
@@ -595,6 +621,7 @@ impl Engine {
         });
     }
     pub fn spawn(&self) {
+        self.spawn_automation();
         let engine = self.clone();
         tokio::spawn(async move {
             crate::discord_bot::run(engine).await;
@@ -615,6 +642,10 @@ impl Engine {
     async fn launch_loop(&self) {
         let mut next_launch = Instant::now();
         while !self.is_shutdown() {
+            if self.session_suspended() {
+                tokio::time::sleep(Duration::from_millis(250)).await;
+                continue;
+            }
             let snapshot = self.snapshot();
             if snapshot.network_suspended {
                 if self.0.roblox.reachable().await {
@@ -639,6 +670,9 @@ impl Engine {
                 if self.is_shutdown() {
                     break;
                 }
+                if self.session_suspended() {
+                    continue;
+                }
                 let current = self
                     .snapshot()
                     .accounts
@@ -661,6 +695,9 @@ impl Engine {
         }
     }
     async fn launch_one(&self, account: Account) {
+        if self.session_suspended() {
+            return;
+        }
         if !self.0.launch_allowed.load(Ordering::Acquire) {
             self.failure(
                 &account.id,
@@ -727,6 +764,9 @@ impl Engine {
         };
         if self
             .update(&account.id, account.generation, |a| {
+                if a.failures > 0 {
+                    a.reconnection_attempts = a.reconnection_attempts.saturating_add(1);
+                }
                 a.status = Status::Launching;
             })
             .is_err()
@@ -776,6 +816,26 @@ impl Engine {
                 return;
             }
         };
+        use crate::bootstrapper::BootstrapperProvider;
+        let settings = saved.account.client.clone();
+        let request =
+            match tokio::task::spawn_blocking(move || settings.bootstrapper.request(&settings))
+                .await
+            {
+                Ok(Ok(request)) => request,
+                error => {
+                    let message = match error {
+                        Ok(Err(message)) => message,
+                        _ => "Bootstrapper discovery failed".into(),
+                    };
+                    self.failure(
+                        &account.id,
+                        account.generation,
+                        Failure::new(FailureKind::Unsupported, &message),
+                    );
+                    return;
+                }
+            };
         // Persist the tracker BEFORE launching. Holding the command mutex through ShellExecute
         // makes Stop linearize either before launch or after durable ownership was recorded.
         let launched = {
@@ -784,7 +844,20 @@ impl Engine {
             let Ok(a) = account_mut(&mut next, &account.id) else {
                 return;
             };
-            if a.generation != account.generation || !a.desired_running || self.is_shutdown() {
+            if a.generation != account.generation
+                || !a.desired_running
+                || self.is_shutdown()
+                || self.session_suspended()
+            {
+                return;
+            }
+            if a.client.bootstrapper != saved.account.client.bootstrapper
+                || a.client.executable != saved.account.client.executable
+            {
+                a.status = Status::Queued;
+                if self.0.store.save(&next.database).is_ok() {
+                    *state = next;
+                }
                 return;
             }
             if account.status == Status::Backoff && !a.auto_recovery {
@@ -803,7 +876,7 @@ impl Engine {
                 Err(e)
             } else {
                 *state = next;
-                platform::launch_for(&uri, &account.id)
+                request.launch(&uri, &account.id)
             }
         };
         if let Err(message) = launched {
@@ -823,6 +896,12 @@ impl Engine {
         let mut close_attempts: HashMap<(u32, String), Instant> = HashMap::new();
         let mut exit_watches: HashMap<(u32, String), platform::ExitWatch> = HashMap::new();
         while !self.is_shutdown() {
+            if self.session_suspended() {
+                last_discovery = Instant::now() - Duration::from_secs(30);
+                last_log_discovery = Instant::now() - Duration::from_secs(30);
+                tokio::time::sleep(Duration::from_millis(250)).await;
+                continue;
+            }
             let retired = self
                 .0
                 .state
@@ -836,12 +915,18 @@ impl Engine {
                     || !retired.is_empty())
             {
                 let result = tokio::task::spawn_blocking(platform::players).await;
+                if self.is_shutdown() || self.session_suspended() {
+                    continue;
+                }
                 if let Ok(Ok(players)) = result {
                     for old in &retired {
                         for player in players.iter().filter(|p| p.tracker == old.tracker) {
                             let identity = player.identity(old.generation);
                             let key = (identity.pid, identity.creation_time.clone());
                             let started = *close_attempts.entry(key).or_insert_with(Instant::now);
+                            if self.is_shutdown() || self.session_suspended() {
+                                continue;
+                            }
                             let _ = platform::close(
                                 &identity,
                                 started.elapsed() >= Duration::from_secs(5),
@@ -928,6 +1013,9 @@ impl Engine {
                         tails.remove(&key);
                         close_attempts.remove(&key);
                         let _ = self.update(&account.id, account.generation, |a| {
+                            if a.connected_since.is_some() {
+                                a.last_disconnect = Some(Utc::now());
+                            }
                             a.process = None;
                             a.tracker = None;
                             a.ownership_deadline = None;
@@ -1012,6 +1100,9 @@ impl Engine {
                 }) else {
                     continue;
                 };
+                if self.session_suspended() {
+                    continue;
+                }
                 let recovering = recovery_due(&account, Utc::now());
                 let should_close = !account.desired_running
                     || account.status == Status::Queued
@@ -1034,6 +1125,9 @@ impl Engine {
                         .entry(key.clone())
                         .or_insert_with(Instant::now);
                     let force = started.elapsed() >= Duration::from_secs(5);
+                    if self.is_shutdown() || self.session_suspended() {
+                        continue;
+                    }
                     if let Err(e) = platform::close(&identity, force) {
                         // Recheck the exact identity: it may have exited while close was in flight.
                         if matches!(platform::alive(&identity), Ok(false)) {
@@ -1063,7 +1157,7 @@ impl Engine {
                 let _ = self.update(id, generation, |a| {
                     if a.desired_running && a.status != Status::NeedsAttention {
                         a.status = Status::Running;
-                        a.connected_since = Some(Utc::now());
+                        a.connected_since.get_or_insert_with(Utc::now);
                         a.disconnected_since = None;
                         a.last_error = None;
                         a.recovery_reason.clear();
@@ -1078,6 +1172,7 @@ impl Engine {
                 let _ = self.update(id, generation, |a| {
                     if a.desired_running && a.status != Status::NeedsAttention {
                         if a.disconnected_since.is_none() {
+                            a.last_disconnect = Some(Utc::now());
                             a.last_error = Some("Game connection lost; allowing 30 seconds to reconnect before recovery".into());
                         }
                         a.status = Status::Reconnecting;
@@ -1128,17 +1223,40 @@ fn account_mut<'a>(s: &'a mut State, id: &str) -> Result<&'a mut Account, String
         .ok_or_else(|| "Account not found".into())
 }
 fn snapshot(s: &State) -> Snapshot {
+    let accounts: Vec<_> = s
+        .database
+        .accounts
+        .iter()
+        .map(|a| a.account.clone())
+        .collect();
+    let runtime_controls: BTreeMap<_, _> = s
+        .runtime_controls
+        .iter()
+        .filter(|(id, sample)| {
+            accounts.iter().any(|a| {
+                a.id == **id
+                    && a.process.is_some()
+                    && a.process == sample.identity
+                    && sample
+                        .identity
+                        .as_ref()
+                        .is_some_and(|p| p.generation == a.generation)
+            })
+        })
+        .map(|(id, sample)| (id.clone(), sample.clone()))
+        .collect();
     Snapshot {
+        metrics: crate::resource::AggregateMetrics::from_accounts(&accounts, &runtime_controls),
+        network_only_reason: crate::client::NETWORK_ONLY_REASON,
+        runtime_controls,
+        anti_afk_paused: s.anti_afk_paused,
+        session_suspended: s.session_suspended,
+        no_render_reason: crate::resource::NO_RENDER_REASON,
         server_selection: s.database.server_selection,
         join_type: s.database.join_type,
         game_profiles: s.database.game_profiles.clone(),
         close_to_tray: s.database.close_to_tray,
-        accounts: s
-            .database
-            .accounts
-            .iter()
-            .map(|a| a.account.clone())
-            .collect(),
+        accounts,
         network_suspended: s.network_suspended,
         compatibility: s.compatibility.clone(),
         profiles: s.database.profiles.clone(),
@@ -1199,6 +1317,227 @@ fn apply_failure(a: &mut Account, error: &Failure) {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[cfg(windows)]
+    #[test]
+    fn client_preferences_are_isolated_durable_and_preserved_by_presets() {
+        use crate::client::*;
+        let (engine, path) = fixture(2);
+        let settings = ClientSettings {
+            mode: ClientMode::Headless,
+            bootstrapper: Bootstrapper::Official,
+            monitoring: false,
+            ..Default::default()
+        };
+        engine
+            .patch(
+                "1",
+                AccountPatch {
+                    client: Some(settings.clone()),
+                    ..Default::default()
+                },
+            )
+            .unwrap();
+        assert_eq!(
+            engine.snapshot().accounts[1].client,
+            ClientSettings::default()
+        );
+        let profile = engine
+            .save_profile(ProfileSave {
+                name: "Clients".into(),
+                account_ids: vec!["1".into()],
+                id: None,
+            })
+            .unwrap();
+        let exported: Vec<LaunchProfile> =
+            serde_json::from_str(&serde_json::to_string(&vec![profile.clone()]).unwrap()).unwrap();
+        engine.delete_profile(profile.id).unwrap();
+        engine.import_profiles(exported).unwrap();
+        engine.client_mode("1", "restore").unwrap();
+        engine
+            .apply_profile(engine.snapshot().profiles[0].id)
+            .unwrap();
+        assert_eq!(engine.snapshot().accounts[0].client, settings);
+        let before = serde_json::to_string(&engine.snapshot().accounts).unwrap();
+        assert!(
+            engine
+                .bulk_patch(BulkPatch {
+                    account_ids: vec!["1".into(), "2".into()],
+                    patch: AccountPatch {
+                        client: Some(ClientSettings {
+                            mode: ClientMode::NetworkOnly,
+                            ..Default::default()
+                        }),
+                        ..Default::default()
+                    }
+                })
+                .is_err()
+        );
+        assert!(engine.client_mode("1", "network_only").is_err());
+        assert_eq!(
+            serde_json::to_string(&engine.snapshot().accounts).unwrap(),
+            before
+        );
+        assert!(engine.snapshot().runtime_controls.is_empty());
+        let reopened = Engine::open(Store::new(path.clone()).unwrap(), "fixture".into()).unwrap();
+        assert_eq!(reopened.snapshot().accounts[0].client, settings);
+        assert_eq!(
+            reopened.snapshot().accounts[1].client,
+            ClientSettings::default()
+        );
+        let identity = ProcessIdentity {
+            pid: 12345,
+            creation_time: "fixture".into(),
+            tracker: "123456".into(),
+            generation: Uuid::new_v4(),
+        };
+        let connected = Utc::now();
+        reopened
+            .transaction(|s| {
+                let a = account_mut(s, "1")?;
+                a.process = Some(identity.clone());
+                a.generation = identity.generation;
+                a.connected_since = Some(connected);
+                a.status = Status::Running;
+                Ok(())
+            })
+            .unwrap();
+        for action in ["hide", "restore"] {
+            let a = reopened.client_mode("1", action).unwrap();
+            assert_eq!(a.process.as_ref(), Some(&identity));
+            assert_eq!(a.generation, identity.generation);
+            assert_eq!(a.connected_since, Some(connected));
+            assert_eq!(a.status, Status::Running);
+        }
+        std::fs::remove_dir_all(path).unwrap();
+    }
+    #[cfg(any(windows, target_os = "linux"))]
+    #[test]
+    fn resource_settings_round_trip_and_runtime_is_not_persisted() {
+        use crate::resource::*;
+        let (engine, path) = fixture(2);
+        engine
+            .transaction(|s| {
+                for saved in &mut s.database.accounts {
+                    saved.encrypted_session = platform::protect("TEST_ONLY_SESSION")?;
+                }
+                Ok(())
+            })
+            .unwrap();
+        let settings = ResourceSettings {
+            mode: ResourceMode::LowResource,
+            affinity: Some("0x3".into()),
+        };
+        engine
+            .bulk_patch(BulkPatch {
+                account_ids: vec!["1".into(), "2".into()],
+                patch: AccountPatch {
+                    resource: Some(settings.clone()),
+                    anti_afk: Some(AntiAfkSettings {
+                        enabled: true,
+                        action: IdleAction::Camera,
+                        headless_foreground_activity: true,
+                    }),
+                    ..Default::default()
+                },
+            })
+            .unwrap();
+        let profile = engine
+            .save_profile(ProfileSave {
+                name: "Resources".into(),
+                account_ids: vec!["1".into(), "2".into()],
+                id: None,
+            })
+            .unwrap();
+        let exported = serde_json::to_string(&vec![profile.clone()]).unwrap();
+        engine.delete_profile(profile.id).unwrap();
+        engine
+            .import_profiles(serde_json::from_str(&exported).unwrap())
+            .unwrap();
+        engine
+            .patch(
+                "1",
+                AccountPatch {
+                    resource: Some(ResourceSettings::default()),
+                    anti_afk: Some(AntiAfkSettings::default()),
+                    ..Default::default()
+                },
+            )
+            .unwrap();
+        engine
+            .apply_profile(engine.snapshot().profiles[0].id)
+            .unwrap();
+        assert_eq!(engine.snapshot().accounts[0].resource, settings);
+        assert!(engine.snapshot().accounts[0].anti_afk.enabled);
+        let before = serde_json::to_string(&engine.snapshot().accounts).unwrap();
+        assert!(
+            engine
+                .bulk_patch(BulkPatch {
+                    account_ids: vec!["1".into(), "2".into()],
+                    patch: AccountPatch {
+                        resource: Some(ResourceSettings {
+                            affinity: Some("0".into()),
+                            ..Default::default()
+                        }),
+                        ..Default::default()
+                    }
+                })
+                .is_err()
+        );
+        assert_eq!(
+            before,
+            serde_json::to_string(&engine.snapshot().accounts).unwrap()
+        );
+        let backup = engine.backup().unwrap();
+        engine
+            .patch(
+                "1",
+                AccountPatch {
+                    resource: Some(ResourceSettings::default()),
+                    ..Default::default()
+                },
+            )
+            .unwrap();
+        engine.restore(&backup).unwrap();
+        assert_eq!(engine.snapshot().accounts[0].resource, settings);
+        engine.set_anti_afk_paused(true);
+        assert!(engine.snapshot().anti_afk_paused);
+        let disk = std::fs::read_to_string(path.join("accounts.json")).unwrap();
+        assert!(
+            !disk.contains("runtime_controls")
+                && !disk.contains("anti_afk_paused")
+                && !disk.contains("working_set_bytes")
+        );
+        let reopened = Engine::open(Store::new(path.clone()).unwrap(), "fixture".into()).unwrap();
+        assert_eq!(reopened.snapshot().accounts[0].resource, settings);
+        assert!(reopened.snapshot().accounts[0].anti_afk.enabled);
+        assert!(
+            reopened.snapshot().accounts[0]
+                .anti_afk
+                .headless_foreground_activity
+        );
+        reopened
+            .patch(
+                "1",
+                AccountPatch {
+                    anti_afk: Some(AntiAfkSettings::default()),
+                    ..Default::default()
+                },
+            )
+            .unwrap();
+        assert!(
+            !reopened.snapshot().accounts[0]
+                .anti_afk
+                .headless_foreground_activity
+        );
+        assert!(
+            reopened.snapshot().accounts[1]
+                .anti_afk
+                .headless_foreground_activity
+        );
+        drop(reopened);
+        drop(engine);
+        std::fs::remove_dir_all(path).unwrap();
+    }
     #[test]
     fn bot_controls_reuse_saved_settings_without_starting_on_save() {
         let path = std::env::temp_dir().join(format!("rbx-bot-control-test-{}", Uuid::new_v4()));

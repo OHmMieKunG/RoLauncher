@@ -73,7 +73,7 @@ if args.smoke_shell:
             elif self.path in ("/v1/activity", "/v1/backups"):
                 body = []
             elif self.path == "/v1/updates/official/check":
-                body = dict(available=False, version=version, release_url="https://github.com/oangsa/RoLauncher/releases/tag/v" + version,
+                body = dict(available=False, version=version, release_url="https://github.com/OHmMieKunG/RoLauncher/releases/tag/v" + version,
                             download_url="", checksums_url="", installer_url="")
             else:
                 self.send_error(404)

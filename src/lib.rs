@@ -1,5 +1,9 @@
 pub mod api;
+pub mod bootstrapper;
 pub mod capture;
+pub mod client;
+pub mod control_policy;
+mod controls;
 #[cfg(any(windows, target_os = "linux"))]
 pub mod desktop;
 pub mod discord;
@@ -13,6 +17,7 @@ pub mod login;
 pub mod logs;
 pub mod model;
 pub mod platform;
+pub mod resource;
 pub mod roblox;
 pub mod store;
 #[cfg(windows)]

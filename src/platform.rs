@@ -65,7 +65,7 @@ mod imp {
         Foundation::*,
         Security::Cryptography::*,
         Storage::FileSystem::*,
-        System::{RestartManager::*, Threading::*},
+        System::{RemoteDesktop::ProcessIdToSessionId, RestartManager::*, Threading::*},
         UI::{Shell::ShellExecuteW, WindowsAndMessaging::*},
     };
     use zeroize::Zeroizing;
@@ -111,7 +111,174 @@ mod imp {
             return false;
         }
         let s = String::from_utf16_lossy(&path[..len as usize]).to_lowercase();
-        s.ends_with("\\robloxplayerbeta.exe") && s.contains("\\roblox\\versions\\")
+        std::env::var("LOCALAPPDATA")
+            .is_ok_and(|root| crate::control_policy::player_image(&s, &root))
+            || {
+                static ROOTS: std::sync::OnceLock<Vec<String>> = std::sync::OnceLock::new();
+                ROOTS
+                    .get_or_init(|| {
+                        [
+                            crate::client::Bootstrapper::Bloxstrap,
+                            crate::client::Bootstrapper::Fishstrap,
+                        ]
+                        .into_iter()
+                        .filter_map(crate::bootstrapper::installed_root)
+                        .map(|root| {
+                            format!(
+                                "{}\\versions\\",
+                                root.to_string_lossy().trim_end_matches('\\').to_lowercase()
+                            )
+                        })
+                        .collect()
+                    })
+                    .iter()
+                    .any(|prefix| {
+                        s.strip_prefix(prefix.as_str())
+                            .and_then(|tail| tail.split_once('\\'))
+                            .is_some_and(|(version, name)| {
+                                version.starts_with("version-") && name == "robloxplayerbeta.exe"
+                            })
+                    })
+            }
+    }
+    fn same_session(pid: u32) -> bool {
+        let mut target = 0;
+        let mut current = 0;
+        unsafe {
+            ProcessIdToSessionId(pid, &mut target) != 0
+                && ProcessIdToSessionId(GetCurrentProcessId(), &mut current) != 0
+                && target == current
+        }
+    }
+    pub(crate) struct ControlProcess(Handle);
+    impl ControlProcess {
+        pub(crate) fn raw(&self) -> HANDLE {
+            self.0.0
+        }
+        pub(crate) fn duplicate(&self) -> Result<Self, String> {
+            let mut handle = std::ptr::null_mut();
+            if unsafe {
+                DuplicateHandle(
+                    GetCurrentProcess(),
+                    self.raw(),
+                    GetCurrentProcess(),
+                    &mut handle,
+                    0,
+                    0,
+                    DUPLICATE_SAME_ACCESS,
+                )
+            } == 0
+            {
+                return Err("Verified process handle duplication unavailable".into());
+            }
+            Ok(Self(Handle(handle)))
+        }
+    }
+    pub(crate) fn verify_controls(
+        identity: &ProcessIdentity,
+        generation: Uuid,
+    ) -> Result<ControlProcess, String> {
+        if identity.generation != generation {
+            return Err("Stale account generation".into());
+        }
+        let handle = process_handle(
+            identity.pid,
+            PROCESS_QUERY_INFORMATION | PROCESS_SET_INFORMATION | PROCESS_VM_READ | SYNCHRONIZE,
+        )?;
+        #[cfg(test)]
+        let fixture = identity.pid == unsafe { GetCurrentProcessId() }
+            && identity.tracker == "RoLauncher-control-fixture";
+        #[cfg(not(test))]
+        let fixture = false;
+        if process_time(handle.0)? != identity.creation_time
+            || (!fixture && !valid_player_image(handle.0))
+            || !same_session(identity.pid)
+            || unsafe { WaitForSingleObject(handle.0, 0) } != WAIT_TIMEOUT
+        {
+            return Err("Process identity or session changed".into());
+        }
+        if fixture {
+            return Ok(ControlProcess(handle));
+        }
+        #[derive(Deserialize)]
+        #[serde(rename_all = "PascalCase")]
+        struct Command {
+            command_line: Option<String>,
+        }
+        let connection =
+            wmi::WMIConnection::new().map_err(|_| "Tracker verification unavailable")?;
+        let rows: Vec<Command> = connection
+            .raw_query(format!(
+                "SELECT CommandLine FROM Win32_Process WHERE ProcessId = {}",
+                identity.pid
+            ))
+            .map_err(|_| "Tracker verification failed")?;
+        if rows.len() != 1
+            || rows[0]
+                .command_line
+                .as_deref()
+                .and_then(tracker_from_command_line)
+                .as_deref()
+                != Some(identity.tracker.as_str())
+        {
+            return Err("Launch tracker ownership changed".into());
+        }
+        if unsafe { WaitForSingleObject(handle.0, 0) } != WAIT_TIMEOUT {
+            return Err("Process exited during ownership verification".into());
+        }
+        Ok(ControlProcess(handle))
+    }
+    #[cfg(test)]
+    pub(crate) fn control_fixture_query_only() -> ControlProcess {
+        ControlProcess(
+            process_handle(
+                unsafe { GetCurrentProcessId() },
+                PROCESS_QUERY_INFORMATION | PROCESS_VM_READ | SYNCHRONIZE,
+            )
+            .unwrap(),
+        )
+    }
+    #[cfg(test)]
+    pub(crate) fn control_fixture_identity(generation: Uuid) -> ProcessIdentity {
+        let pid = unsafe { GetCurrentProcessId() };
+        let handle = process_handle(pid, PROCESS_QUERY_INFORMATION).unwrap();
+        ProcessIdentity {
+            pid,
+            creation_time: process_time(handle.0).unwrap(),
+            tracker: "RoLauncher-control-fixture".into(),
+            generation,
+        }
+    }
+    pub(crate) fn gpu_engines() -> Result<std::collections::HashMap<u32, (f64, String)>, String> {
+        #[derive(Deserialize)]
+        #[serde(rename_all = "PascalCase")]
+        struct EngineRow {
+            name: String,
+            utilization_percentage: u64,
+        }
+        let connection = wmi::WMIConnection::new().map_err(|_| "GPU counters unavailable")?;
+        let rows: Vec<EngineRow> = connection.raw_query("SELECT Name, UtilizationPercentage FROM Win32_PerfFormattedData_GPUPerformanceCounters_GPUEngine")
+            .map_err(|_| "GPU engine counters unavailable")?;
+        let mut result: std::collections::HashMap<u32, (f64, String)> =
+            std::collections::HashMap::new();
+        for row in rows {
+            let Some(pid) = row
+                .name
+                .strip_prefix("pid_")
+                .and_then(|tail| tail.split('_').next())
+                .and_then(|pid| pid.parse::<u32>().ok())
+            else {
+                continue;
+            };
+            let value = row.utilization_percentage.min(100) as f64;
+            if result
+                .get(&pid)
+                .is_none_or(|(previous, _)| value > *previous)
+            {
+                result.insert(pid, (value, row.name));
+            }
+        }
+        Ok(result)
     }
     pub fn players() -> Result<Vec<Player>, String> {
         #[derive(Deserialize)]
@@ -138,7 +305,7 @@ mod imp {
             ) else {
                 continue;
             };
-            if !valid_player_image(h.0) {
+            if !valid_player_image(h.0) || !same_session(row.process_id) {
                 continue;
             }
             if let Ok(creation_time) = process_time(h.0) {

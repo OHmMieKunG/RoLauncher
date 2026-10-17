@@ -42,6 +42,12 @@ class Fixture(BaseHTTPRequestHandler):
         if self.path == "/v1/status":
             self.reply(dict(accounts=accounts, profiles=profiles, game_profiles=game_profiles, close_to_tray=close_to_tray, update_repository="", include_beta_updates=include_beta_updates, network_suspended=False, compatibility="UI fixture · real-client validation remains outstanding", **game_settings))
         elif self.path.startswith("/v1/games/"): self.reply(dict(name="Fixture game", thumbnail_url=None))
+        elif self.path == "/v1/bootstrappers":
+            self.reply([
+                dict(provider="system", executable="C:\\Fixture\\Fishstrap.exe", configuration=None, available=True, reason="Fixture handler"),
+                dict(provider="official", executable=None, configuration=None, available=False, reason="Not installed"),
+                dict(provider="bloxstrap", executable="C:\\Fixture\\Bloxstrap.exe", configuration=None, available=False, reason="Not registered"),
+                dict(provider="fishstrap", executable="C:\\Fixture\\Fishstrap.exe", configuration=None, available=True, reason="Fixture only")])
         elif self.path == "/v1/profiles": self.reply(profiles)
         elif self.path == "/v1/backups": self.reply(backups)
         elif self.path.startswith("/v1/activity"):
@@ -70,9 +76,9 @@ class Fixture(BaseHTTPRequestHandler):
             major, minor, patch = map(int, version.split('-')[0].split('.'))
             newer = f"{major}.{minor}.{patch + 1}"
             tag = ("beta-v" if include_beta_updates else "v") + newer
-            prefix = f"https://github.com/oangsa/RoLauncher/releases/download/{tag}/rolauncher-v{newer}"
+            prefix = f"https://github.com/OHmMieKunG/RoLauncher/releases/download/{tag}/rolauncher-v{newer}"
             self.reply(dict(available=True, version=newer,
-                prerelease=include_beta_updates, release_url=f"https://github.com/oangsa/RoLauncher/releases/tag/{tag}",
+                prerelease=include_beta_updates, release_url=f"https://github.com/OHmMieKunG/RoLauncher/releases/tag/{tag}",
                 download_url=prefix + "-windows-x64.zip", checksums_url=prefix + "-SHA256SUMS.txt", installer_url=prefix + "-setup-x64.exe"))
             return
         if self.path == "/v1/game-profiles":

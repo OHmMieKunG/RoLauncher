@@ -7,6 +7,10 @@ try {
     if ($LASTEXITCODE -ne 0) { throw 'Versioning checks failed' }
     & python "$PSScriptRoot\test-publish-beta.py"
     if ($LASTEXITCODE -ne 0) { throw 'Beta publication checks failed' }
+    & python "$PSScriptRoot\test-client-report.py"
+    if ($LASTEXITCODE -ne 0) { throw 'Client evidence report checks failed' }
+    & python "$PSScriptRoot\test-create-archive.py"
+    if ($LASTEXITCODE -ne 0) { throw 'ZIP packaging checks failed' }
     & cargo test --locked
     if ($LASTEXITCODE -ne 0) { throw 'Tests failed' }
     & cargo fmt --check

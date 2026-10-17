@@ -1,7 +1,7 @@
 //! Release discovery; installers are validated and applied by the desktop updater.
 use serde::{Deserialize, Serialize};
 
-pub const DEFAULT_REPOSITORY: &str = "oangsa/RoLauncher";
+pub const DEFAULT_REPOSITORY: &str = "OHmMieKunG/RoLauncher";
 
 pub fn repository_or_default(repository: &str) -> &str {
     if repository.trim().is_empty() {

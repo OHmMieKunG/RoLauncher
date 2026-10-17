@@ -23,6 +23,7 @@ internal static class UpdateDownloadTests
         Rejected(() => UpdateDownloader.ValidateRelease(linux ? view with { DownloadUrl = "https://evil.example/package.tar.gz" }
             : view with { InstallerUrl = "https://evil.example/setup.exe" }, "1.0.0"), "Foreign platform packages are rejected.");
         Rejected(() => UpdateDownloader.ValidateRelease(view with { Version = "1.0.1-beta" }, "1.0.0"), "Prerelease metadata is rejected.");
+        Rejected(() => UpdateDownloader.ValidateRelease(view with { ReleaseUrl = view.ReleaseUrl.Replace("OHmMieKunG/RoLauncher", "oangsa/RoLauncher") }, "1.0.0"), "Upstream release links cannot replace fork packages.");
         var beta = view with {
             Prerelease = true,
             ReleaseUrl = view.ReleaseUrl.Replace("/v1.0.1", "/beta-v1.0.1"),

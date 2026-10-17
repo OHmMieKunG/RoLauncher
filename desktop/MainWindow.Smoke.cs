@@ -224,6 +224,21 @@ public sealed partial class MainWindow
             var modal = ShowAccountAsync(_rows[0]);
             await Task.Delay(500);
             Assert(_modalOpen && _editorRow!.Id == "0", "Row details open a modal independent of selection.");
+            Assert(DialogClientMode.SelectedIndex == 0 && !((ComboBoxItem)DialogClientMode.Items[2]).IsEnabled,
+                "Legacy accounts use Normal and Network-only is visibly disabled.");
+            Assert(DialogBootstrapper.SelectedIndex == 0 && DialogMonitoring.IsChecked == true,
+                "Legacy accounts retain the installed protocol and monitoring defaults.");
+            Assert(((ComboBoxItem)DialogBootstrapper.Items[0]).Content.ToString() == "Auto-detect (Fishstrap)" &&
+                BootstrapperDetection.Text.Contains("Bloxstrap: detected") && BootstrapperDetection.Text.Contains("Not registered"),
+                "Opening account details automatically detects launchers without replacing its saved selection.");
+            DialogClientMode.SelectedIndex = 1;
+            DialogBootstrapper.SelectedIndex = 1;
+            DialogExecutable.Text = @"C:\Fixture\RobloxPlayerBeta.exe";
+            await RefreshBootstrapperDetectionAsync();
+            Assert(DialogBootstrapper.SelectedIndex == 1 && DialogExecutable.Text == @"C:\Fixture\RobloxPlayerBeta.exe",
+                "Refreshing launcher detection preserves an explicit provider and executable override.");
+            DialogExecutable.Text = "";
+            DialogResource.SelectedIndex = 2;
             AliasInput.Text = "Studio account";
             Assert(FindVisual<Button>(OpenDialog(), "PrimaryButton")!.ActualWidth < 240 &&
                 FindVisual<Button>(OpenDialog(), "CloseButton")!.ActualWidth < 180,
@@ -242,6 +257,9 @@ public sealed partial class MainWindow
             await modal.WaitAsync(TimeSpan.FromSeconds(5));
             state = await _api.GetAsync<Snapshot>("status");
             Assert(state.Accounts[0].Alias == "Studio account", "Modal Save persists through the actual primary button.");
+            Assert(state.Accounts[0].ClientOptions.Mode == "headless" && state.Accounts[0].ClientOptions.Bootstrapper == "official" && state.Accounts[0].ResourceOptions.Mode == "balanced",
+                "Client mode, provider and Balanced preferences save through the existing editor.");
+            Assert(state.Accounts[1].ClientOptions.Mode == "normal", "Client changes leave other accounts independent.");
 
             modal = ShowAccountAsync(_rows[0]);
             await Task.Delay(500);

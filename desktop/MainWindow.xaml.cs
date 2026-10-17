@@ -24,7 +24,13 @@ public sealed partial class MainWindow : Window
     private bool _modalOpen, _saving, _editorRecovery;
     private bool _updating, _refreshing, _exiting, _disposed;
     private bool _discordReady;
-    private bool _networkSuspended;
+    private bool _networkSuspended, _antiAfkPaused;
+    private ResourceSettings _editorResource = new();
+    private AntiAfkSettings _editorAntiAfk = new();
+    private ClientSettings _editorClient = new();
+    private static readonly string[] ProviderValues = ["system", "official", "bloxstrap", "fishstrap", "custom"];
+    private static string ResourceValue(int index) => index switch { 1 => "low_resource", 2 => "balanced", _ => "normal" };
+    private static int ResourceIndex(string mode) => mode switch { "low_resource" => 1, "balanced" => 2, _ => 0 };
     private string? _lastRefreshFeedback;
     private string _activityFingerprint = "";
 
@@ -247,6 +253,19 @@ public sealed partial class MainWindow : Window
         AliasInput.Text = _editorOriginal.Alias; PlaceInput.Text = _editorOriginal.Place;
         JobInput.Text = _editorOriginal.Job; PrivateInput.Text = _editorOriginal.Private;
         DialogGame.SelectedItem = (object?)_gameProfiles.FirstOrDefault(p => p.Id == row.Account.GameProfileId && p.Target == row.Account.Target) ?? "Custom destination";
+        _editorResource = row.Account.ResourceOptions; _editorAntiAfk = row.Account.AntiAfkOptions;
+        DialogResource.SelectedIndex = ResourceIndex(_editorResource.Mode);
+        _editorClient = row.Account.ClientOptions;
+        DialogClientMode.SelectedIndex = _editorClient.Mode == "headless" ? 1 : 0;
+        DialogBootstrapper.SelectedIndex = Math.Max(0, Array.IndexOf(ProviderValues, _editorClient.Bootstrapper));
+        DialogExecutable.Text = _editorClient.Executable ?? "";
+        DialogAutoHide.IsChecked = _editorClient.AutoHide;
+        DialogStartup.IsChecked = _editorClient.StartOnOpen;
+        DialogMonitoring.IsChecked = _editorClient.Monitoring;
+        DialogAffinity.Text = _editorResource.Affinity ?? "";
+        DialogAntiAfk.IsChecked = _editorAntiAfk.Enabled;
+        DialogHeadlessActivity.IsChecked = _editorAntiAfk.HeadlessForegroundActivity;
+        DialogIdleAction.SelectedIndex = _editorAntiAfk.Action == "camera" ? 1 : 0;
         DialogRejoin.IsChecked = row.Account.AutoRecovery;
         DialogGroup.Text = row.Account.Group;
         DialogFallback.SelectedIndex = PolicyIndex(row.Account.FallbackPolicy);
@@ -260,6 +279,7 @@ public sealed partial class MainWindow : Window
         ApplyDialogTheme(_accountDialog);
         try
         {
+            _ = RefreshBootstrapperDetectionAsync();
             await ShowAccountDialogAsync();
         }
         finally
@@ -300,6 +320,15 @@ public sealed partial class MainWindow : Window
         if ((DialogRejoin.IsChecked == true) != _editorRecovery) patch["auto_recovery"] = DialogRejoin.IsChecked == true;
         if (DialogGroup.Text != _editorGroup) patch["group"] = DialogGroup.Text;
         if (PolicyValue(DialogFallback.SelectedIndex) != _editorPolicy) patch["fallback_policy"] = PolicyValue(DialogFallback.SelectedIndex);
+        if (!ResourceSettings.TryCreate(ResourceValue(DialogResource.SelectedIndex), DialogAffinity.Text, out var resource, out var resourceError))
+        { EditorError.Message = resourceError; EditorError.IsOpen = true; return false; }
+        var antiAfk = new AntiAfkSettings(DialogAntiAfk.IsChecked == true, DialogIdleAction.SelectedIndex == 1 ? "camera" : "space", DialogHeadlessActivity.IsChecked == true);
+        if (resource != _editorResource) patch["resource"] = resource;
+        if (antiAfk != _editorAntiAfk) patch["anti_afk"] = antiAfk;
+        var client = new ClientSettings(DialogClientMode.SelectedIndex == 1 ? "headless" : "normal", ProviderValues[DialogBootstrapper.SelectedIndex],
+            string.IsNullOrWhiteSpace(DialogExecutable.Text) ? null : DialogExecutable.Text.Trim(), DialogAutoHide.IsChecked == true,
+            DialogStartup.IsChecked == true, DialogMonitoring.IsChecked == true);
+        if (client != _editorClient) patch["client"] = client;
         if (patch.Count == 0) return true;
         _saving = true;
         SetEditorEnabled(false);
@@ -325,6 +354,8 @@ public sealed partial class MainWindow : Window
     }
     private void SetEditorEnabled(bool enabled)
     {
+        DialogClientMode.IsEnabled = DialogBootstrapper.IsEnabled = DialogExecutable.IsEnabled = DialogAutoHide.IsEnabled = DialogStartup.IsEnabled = DialogMonitoring.IsEnabled = enabled && OperatingSystem.IsWindows();
+        DialogResource.IsEnabled = DialogAffinity.IsEnabled = DialogAntiAfk.IsEnabled = DialogHeadlessActivity.IsEnabled = DialogIdleAction.IsEnabled = enabled && OperatingSystem.IsWindows();
         AliasInput.IsEnabled = enabled;
         var custom = DialogGame.SelectedItem is not GameProfile;
         PlaceInput.IsEnabled = JobInput.IsEnabled = PrivateInput.IsEnabled = enabled && custom;
@@ -442,12 +473,12 @@ public sealed partial class MainWindow : Window
                 try
                 {
                     var path = $"accounts/{Uri.EscapeDataString(row.Id)}";
-                    await _api.SendAsync(action == "remove" ? HttpMethod.Delete : HttpMethod.Post, action == "remove" ? path : $"{path}/{action}");
+                    await _api.SendAsync(action == "remove" ? HttpMethod.Delete : HttpMethod.Post, action == "remove" ? path : action is "hide" or "restore" ? $"{path}/client/{action}" : $"{path}/{action}");
                     success++;
                 }
                 catch (ApiException ex) { errors.Add($"{row.Alias}: {ex.Message}"); }
             }
-            FeedbackMessage($"Applied to {success}/{selected.Length} accounts. {string.Join(" ", errors)}", errors.Count == 0 ? InfoBarSeverity.Success : InfoBarSeverity.Warning);
+            FeedbackMessage($"Requested for {success}/{selected.Length} accounts. {string.Join(" ", errors)}", errors.Count == 0 ? InfoBarSeverity.Success : InfoBarSeverity.Warning);
             await RefreshAsync();
         });
     }
@@ -562,6 +593,13 @@ public sealed partial class MainWindow : Window
         }
         finally { token.Text = ""; button.IsEnabled = true; _modalOpen = false; }
     }
+    private async void PauseAntiAfk_Click(object sender, RoutedEventArgs e) => await ToggleAntiAfkAsync();
+    private async Task ToggleAntiAfkAsync() => await GuardAsync(async () =>
+    {
+        var latest = await _api.GetAsync<Snapshot>("status");
+        await _api.SendAsync(HttpMethod.Patch, "settings/anti-afk", new { paused = !latest.AntiAfkPaused });
+        await RefreshAsync();
+    });
     private async void Exit_Click(object sender, RoutedEventArgs e) => await ExitAsync();
     private Task ExitAsync()
     {

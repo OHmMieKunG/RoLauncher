@@ -7,6 +7,37 @@ namespace RoLauncher.Desktop;
 
 public sealed partial class MainWindow
 {
+    private async void AllInstances_Click(object sender, RoutedEventArgs e) => await RunActionAsync((string)((Button)sender).Tag, _rows.ToArray());
+    private int _bootstrapperDetectionRequest;
+    private async void DetectBootstrappers_Click(object sender, RoutedEventArgs e) => await RefreshBootstrapperDetectionAsync();
+    private async Task RefreshBootstrapperDetectionAsync()
+    {
+        if (!OperatingSystem.IsWindows()) return;
+        var request = ++_bootstrapperDetectionRequest;
+        var row = _editorRow;
+        BootstrapperDetection.Text = "Detecting installed launchers…";
+        for (var i = 0; i < 4; i++)
+            ((ComboBoxItem)DialogBootstrapper.Items[i]).Content = new BootstrapperInstallation(ProviderValues[i], null, null, false, "").Name;
+        try
+        {
+            var providers = await _api.GetAsync<BootstrapperInstallation[]>("bootstrappers") ?? [];
+            if (request != _bootstrapperDetectionRequest || _editorRow != row || !_modalOpen) return;
+            var automatic = providers.FirstOrDefault(p => p.Provider == "system");
+            ((ComboBoxItem)DialogBootstrapper.Items[0]).Content = automatic?.AutoLabel ?? "Auto-detect (unavailable)";
+            for (var i = 1; i < 4; i++)
+            {
+                var provider = providers.FirstOrDefault(p => p.Provider == ProviderValues[i]);
+                if (provider is not null)
+                    ((ComboBoxItem)DialogBootstrapper.Items[i]).Content = $"{provider.Name} ({(provider.Executable is null ? "not detected" : provider.Available ? "detected" : "detected; unavailable")})";
+            }
+            BootstrapperDetection.Text = string.Join("\n", providers.Where(p => p.Provider != "system").Select(p => p.DetectionLabel));
+        }
+        catch (Exception error) when (error is ApiException or HttpRequestException or JsonException or TaskCanceledException)
+        {
+            if (request == _bootstrapperDetectionRequest && _editorRow == row && _modalOpen)
+                BootstrapperDetection.Text = "Could not detect launchers. Your saved selection is unchanged; refresh to retry.";
+        }
+    }
     private string _editorGroup = "", _editorPolicy = "allow_public";
     private string _profileFingerprint = "", _groupFingerprint = "", _historyFingerprint = "";
     private string _activityJson = "";
@@ -26,6 +57,13 @@ public sealed partial class MainWindow
     private void UpdateManagement(Snapshot snapshot)
     {
         UpdateWorkspace(snapshot);
+        _antiAfkPaused = snapshot.AntiAfkPaused;
+        PauseAntiAfk.Content = _antiAfkPaused ? "Resume Anti-AFK" : "Pause Anti-AFK";
+        PauseAntiAfk.IsEnabled = OperatingSystem.IsWindows();
+        ResourceAvailability.Text = $"{snapshot.NoRenderReason}. " + (!OperatingSystem.IsWindows() ? "Resource controls and Anti-AFK unavailable on this platform." : snapshot.SessionSuspended ? "Automation suspended during lock/sleep." : _antiAfkPaused ? "Scheduled input paused." : "Anti-AFK is opt-in per account; Ctrl+Alt+P pauses or resumes it.");
+        foreach (var row in _rows) row.SetRuntime(snapshot.RuntimeControls?.GetValueOrDefault(row.Id));
+        var metrics = snapshot.Metrics;
+        InstanceTotals.Text = metrics is null ? "Instance metrics unavailable" : $"{metrics.ActiveAccounts} active | {metrics.ConnectedClients} connected | CPU {metrics.CpuPercent?.ToString("F1") ?? "unavailable"}% | RAM {(metrics.WorkingSetBytes is { } ram ? $"{ram / 1048576.0:F1} MiB" : "unavailable")} ({metrics.MeasuredClients} measured) | total GPU unavailable";
         CompatibilityText.Text = snapshot.Compatibility;
         if (!_savingUpdateSettings)
         {
@@ -107,6 +145,10 @@ public sealed partial class MainWindow
             GroupApply = new() { Content = "Apply group" }, FallbackApply = new() { Content = "Apply fallback" };
         public TextBox Alias = new() { Header = "Alias · {username}, {id}, {index}", MaxLength = 100 },
             Place = new() { Header = "Place ID" }, Job = new() { Header = "Job ID · optional" }, Private = new() { Header = "Private server link · optional", MaxLength = 2048 }, Group = new() { Header = "Group · blank clears", MaxLength = 100 };
+        public CheckBox ResourceApply = new() { Content = "Apply resource settings" }, AntiAfkApply = new() { Content = "Apply Anti-AFK settings" }, AntiAfk = new() { Content = "Enable Anti-AFK every ten minutes" };
+        public CheckBox HeadlessActivity = new() { Content = "Allow brief Headless activation after 60 seconds idle (experimental)" };
+        public ComboBox Resource = new() { Header = "Resource profile", SelectedIndex = 0, Items = { "Default", "Low Resource", "Balanced" } }, IdleAction = new() { Header = "Anti-AFK action", SelectedIndex = 0, Items = { "Space", "Camera (I/O)" } };
+        public TextBox Affinity = new() { Header = "CPU affinity - optional hex mask", MaxLength = 18 };
         public ComboBox Fallback = PolicyPicker();
         public ComboBox Game = new() { Header = "Saved game · optional", HorizontalAlignment = HorizontalAlignment.Stretch, PlaceholderText = "Custom destination" };
         public InfoBar Error = new() { IsClosable = false, Severity = InfoBarSeverity.Error };
@@ -116,6 +158,8 @@ public sealed partial class MainWindow
             ApplyAlias = AliasApply.IsChecked == true, ApplyTarget = TargetApply.IsChecked == true, ClearTarget = ClearTarget.IsChecked == true,
             GameProfileId = (Game.SelectedItem as GameProfile)?.Id,
             ApplyRejoin = RejoinApply.IsChecked == true, Rejoin = Rejoin.IsChecked == true, ApplyGroup = GroupApply.IsChecked == true, Group = Group.Text,
+            ApplyResource = ResourceApply.IsChecked == true, ResourceMode = ResourceValue(Resource.SelectedIndex), Affinity = Affinity.Text,
+            ApplyAntiAfk = AntiAfkApply.IsChecked == true, AntiAfkEnabled = AntiAfk.IsChecked == true, AntiAfkAction = IdleAction.SelectedIndex == 1 ? "camera" : "space", HeadlessForegroundActivity = HeadlessActivity.IsChecked == true,
             ApplyFallback = FallbackApply.IsChecked == true, Fallback = PolicyValue(Fallback.SelectedIndex)
         };
     }
@@ -133,6 +177,11 @@ public sealed partial class MainWindow
             form.Private.Text = profile.Target.PrivateServerLink ?? "";
             EnableFields();
         };
+        form.Resource.SelectedIndex = rows.Select(r => r.Account.ResourceOptions.Mode).Distinct().Count() == 1 ? ResourceIndex(rows[0].Account.ResourceOptions.Mode) : 0;
+        form.Affinity.Text = Common(rows, a => a.ResourceOptions.Affinity ?? "");
+        form.AntiAfk.IsChecked = rows.All(r => r.Account.AntiAfkOptions.Enabled);
+        form.HeadlessActivity.IsChecked = rows.All(r => r.Account.AntiAfkOptions.HeadlessForegroundActivity);
+        form.IdleAction.SelectedIndex = rows.All(r => r.Account.AntiAfkOptions.Action == "camera") ? 1 : 0;
         form.Alias.Text = Common(rows, a => a.Alias); form.Alias.PlaceholderText = "Mixed · e.g. Team {index}";
         form.Place.Text = Common(rows, a => a.Target?.PlaceId.ToString() ?? ""); form.Place.PlaceholderText = "Mixed or unset";
         form.Job.Text = Common(rows, a => a.Target?.JobId ?? ""); form.Private.Text = Common(rows, a => a.Target?.PrivateServerLink ?? "");
@@ -144,7 +193,7 @@ public sealed partial class MainWindow
         var content = new StackPanel { Spacing = 10 };
         content.Children.Add(new TextBlock { Text = $"Only checked settings change. Destination replaces Place ID, Job ID, and private link on the next launch.", TextWrapping = TextWrapping.Wrap });
         content.Children.Add(new Expander { Header = "Included accounts", HorizontalAlignment = HorizontalAlignment.Stretch, Content = new ScrollViewer { MaxHeight = 160, Content = new TextBlock { Text = string.Join("\n", rows.Select(r => $"{r.Alias} · @{r.Account.Username} · {r.Id}")), TextWrapping = TextWrapping.Wrap } } });
-        foreach (var element in new UIElement[] { form.AliasApply, form.Alias, form.TargetApply, form.ClearTarget, form.Game, form.Place, form.Job, form.Private, form.RejoinApply, form.Rejoin, form.GroupApply, form.Group, form.FallbackApply, form.Fallback, form.Error })
+        foreach (var element in new UIElement[] { form.AliasApply, form.Alias, form.TargetApply, form.ClearTarget, form.Game, form.Place, form.Job, form.Private, form.RejoinApply, form.Rejoin, form.GroupApply, form.Group, form.FallbackApply, form.Fallback, form.ResourceApply, form.Resource, form.Affinity, form.AntiAfkApply, form.AntiAfk, form.HeadlessActivity, form.IdleAction, form.Error })
         {
             content.Children.Add(element);
             if (element == form.Rejoin)
@@ -152,13 +201,16 @@ public sealed partial class MainWindow
         }
         void EnableFields()
         {
+            form.ResourceApply.IsEnabled = form.AntiAfkApply.IsEnabled = OperatingSystem.IsWindows();
+            form.Resource.IsEnabled = form.Affinity.IsEnabled = form.ResourceApply.IsChecked == true && OperatingSystem.IsWindows();
+            form.AntiAfk.IsEnabled = form.HeadlessActivity.IsEnabled = form.IdleAction.IsEnabled = form.AntiAfkApply.IsChecked == true && OperatingSystem.IsWindows();
             form.Alias.IsEnabled = form.AliasApply.IsChecked == true;
             form.ClearTarget.IsEnabled = form.TargetApply.IsChecked == true;
             form.Place.IsEnabled = form.Job.IsEnabled = form.Private.IsEnabled = form.TargetApply.IsChecked == true && form.ClearTarget.IsChecked != true && form.Game.SelectedItem is not GameProfile;
             form.Rejoin.IsEnabled = form.RejoinApply.IsChecked == true; form.Group.IsEnabled = form.GroupApply.IsChecked == true;
             form.Fallback.IsEnabled = form.FallbackApply.IsChecked == true;
         }
-        foreach (var check in new[] { form.AliasApply, form.TargetApply, form.ClearTarget, form.RejoinApply, form.GroupApply, form.FallbackApply })
+        foreach (var check in new[] { form.AliasApply, form.TargetApply, form.ClearTarget, form.RejoinApply, form.GroupApply, form.FallbackApply, form.ResourceApply, form.AntiAfkApply })
         {
             check.Checked += (_, _) => EnableFields(); check.Unchecked += (_, _) => EnableFields();
         }

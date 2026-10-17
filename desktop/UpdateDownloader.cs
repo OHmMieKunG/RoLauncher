@@ -8,10 +8,10 @@ namespace RoLauncher.Desktop;
 
 public sealed record DownloadedInstaller(string Path, string Sha256, string Version);
 
-/// Downloads only the official publisher's platform package; never forwards local API credentials.
+/// Downloads only the fork publisher's platform package; never forwards local API credentials.
 public sealed class UpdateDownloader : IDisposable
 {
-    public const string Publisher = "https://github.com/oangsa/RoLauncher";
+    public const string Publisher = "https://github.com/OHmMieKunG/RoLauncher";
     public const long MaximumInstallerBytes = 256L * 1024 * 1024;
     private readonly HttpClient _http;
     private readonly string _cache;
@@ -39,7 +39,7 @@ public sealed class UpdateDownloader : IDisposable
         var downloadUrl = OperatingSystem.IsLinux() ? view.DownloadUrl : view.InstallerUrl;
         if (downloadUrl != prefix + name || view.ChecksumsUrl != prefix + $"rolauncher-v{view.Version}-SHA256SUMS.txt" ||
             view.ReleaseUrl != $"{Publisher}/releases/tag/{tag}")
-            throw new InvalidDataException("Automatic installation is supported only for official RoLauncher releases.");
+            throw new InvalidDataException("Automatic installation is supported only for configured fork releases.");
         return name;
     }
 

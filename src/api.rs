@@ -41,6 +41,7 @@ pub fn router(engine: Engine) -> Router {
         )
         .route("/v1/games/{place_id}", get(game_details))
         .route("/v1/settings/window", patch(window_settings))
+        .route("/v1/settings/anti-afk", patch(anti_afk_pause))
         .route("/v1/settings/game", patch(game_settings))
         .route("/v1/profiles", get(profiles).post(profile_save))
         .route("/v1/profiles/import", post(profile_import))
@@ -57,6 +58,8 @@ pub fn router(engine: Engine) -> Router {
         .route("/v1/login", post(browser_login))
         .route("/v1/accounts/{id}", patch(update).delete(remove))
         .route("/v1/accounts/{id}/repair", post(repair))
+        .route("/v1/accounts/{id}/client/{action}", post(client_action))
+        .route("/v1/bootstrappers", get(bootstrappers))
         .route("/v1/accounts/{id}/{action}", post(command))
         .route("/v1/operations/{id}", get(operation))
         .route("/v1/events", get(events))
@@ -123,6 +126,18 @@ async fn window_settings(
         .set_close_to_tray(settings.close_to_tray)
         .map(|_| StatusCode::NO_CONTENT)
         .map_err(error)
+}
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct AntiAfkPause {
+    paused: bool,
+}
+async fn anti_afk_pause(
+    State(engine): State<Engine>,
+    Json(settings): Json<AntiAfkPause>,
+) -> StatusCode {
+    engine.set_anti_afk_paused(settings.paused);
+    StatusCode::NO_CONTENT
 }
 fn open_login(engine: Engine, expected: Option<String>) -> Result<StatusCode, ApiError> {
     #[cfg(any(windows, target_os = "linux"))]
@@ -384,6 +399,21 @@ async fn command(
         .map(|op| (StatusCode::ACCEPTED, Json(op)))
         .map_err(error)
 }
+async fn bootstrappers() -> Result<Json<Vec<crate::bootstrapper::Installation>>, ApiError> {
+    tokio::task::spawn_blocking(crate::bootstrapper::installations)
+        .await
+        .map(Json)
+        .map_err(|_| error("Bootstrapper discovery failed".into()))
+}
+async fn client_action(
+    State(engine): State<Engine>,
+    Path((id, action)): Path<(String, String)>,
+) -> Result<(StatusCode, Json<crate::model::Account>), ApiError> {
+    engine
+        .client_mode(&id, &action)
+        .map(|account| (StatusCode::ACCEPTED, Json(account)))
+        .map_err(error)
+}
 async fn repair(
     State(engine): State<Engine>,
     Path(id): Path<String>,
@@ -607,6 +637,7 @@ mod tests {
             ),
             ("GET", "/v1/games/1818"),
             ("PATCH", "/v1/settings/window"),
+            ("PATCH", "/v1/settings/anti-afk"),
             ("POST", "/v1/profiles/import"),
             ("GET", "/v1/activity"),
             ("GET", "/v1/diagnostics"),
@@ -705,6 +736,37 @@ mod tests {
         )
         .unwrap();
         let app = router(engine.clone());
+        for (method, route) in [
+            ("GET", "/v1/bootstrappers"),
+            ("POST", "/v1/accounts/1/client/hide"),
+            ("POST", "/v1/accounts/1/client/network_only"),
+        ] {
+            let response = app
+                .clone()
+                .oneshot(
+                    Request::builder()
+                        .method(method)
+                        .uri(route)
+                        .body(axum::body::Body::empty())
+                        .unwrap(),
+                )
+                .await
+                .unwrap();
+            assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
+        }
+        let response = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/v1/accounts/1/client/network_only")
+                    .header("authorization", format!("Bearer {}", engine.token()))
+                    .body(axum::body::Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::BAD_REQUEST);
         for origin in [false, true] {
             let mut request = Request::builder().method("POST").uri("/v1/login");
             if origin {
