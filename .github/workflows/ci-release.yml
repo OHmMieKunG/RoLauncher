@@ -2,7 +2,7 @@ name: CI and release
 
 on:
   push:
-    branches: [main, dev, 'feature/**']
+    branches: [main, dev, 'feature/**', 'codex/**', 'hotfix/**']
   pull_request:
     branches: [dev, main]
   workflow_dispatch:
@@ -15,21 +15,13 @@ jobs:
     name: Branch flow
     runs-on: ubuntu-latest
     steps:
-      - name: Require feature PRs into dev and dev PRs into main
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          persist-credentials: false
+      - name: Check development, governance and isolated hotfix branch flow
         env:
-          EVENT: ${{ github.event_name }}
-          BASE: ${{ github.base_ref }}
-          HEAD: ${{ github.head_ref }}
-          HEAD_REPO: ${{ github.event.pull_request.head.repo.full_name }}
-          REPO: ${{ github.repository }}
-        run: |
-          if [ "$EVENT" = pull_request ]; then
-            if [ "$BASE" = main ]; then
-              test "$HEAD" = dev && test "$HEAD_REPO" = "$REPO"
-            else
-              case "$HEAD" in feature/*) ;; *) exit 1 ;; esac
-            fi
-          fi
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: python3 scripts/branch-flow.py
 
   windows-checks:
     name: Windows checks
@@ -43,6 +35,7 @@ jobs:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
+          persist-credentials: false
       - uses: actions/setup-dotnet@v4
         with:
           dotnet-version: '8.0.x'
@@ -69,7 +62,7 @@ jobs:
         run: python scripts/verify-package.py --smoke-shell
       - uses: actions/upload-artifact@v4
         with:
-          name: release-files
+          name: release-files-attempt-${{ github.run_attempt }}
           path: |
             dist/rolauncher-v*-setup-x64.exe
             dist/rolauncher-v*-windows-x64.zip
@@ -97,6 +90,8 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y build-essential pkg-config libdbus-1-dev python3 libfontconfig1 libx11-6 libxrandr2 libxi6 libxtst6 libgl1 xvfb xauth fonts-dejavu-core
       - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
       - uses: actions/setup-dotnet@v4
         with:
           dotnet-version: |
@@ -117,6 +112,9 @@ jobs:
           python3 scripts/check-release.py
           python3 scripts/test-linux-update.py
           python3 scripts/test-publish-beta.py
+          python3 scripts/test-release-promotion.py
+          python3 scripts/test-hotfix-policy.py
+          python3 scripts/test-owner-evidence.py
           python3 scripts/test-sober-isolation-adapter.py
           dotnet restore desktop.tests/RoLauncher.Desktop.Tests.csproj --locked-mode --configfile desktop/NuGet.Config
           dotnet run --project desktop.tests --no-restore -c Release
@@ -138,7 +136,7 @@ jobs:
           xvfb-run -a -s '-screen 0 1280x1024x24' python3 scripts/verify-linux-package.py --directory "target/linux/rolauncher-v$version" --smoke-shell
       - uses: actions/upload-artifact@v4
         with:
-          name: release-linux-files
+          name: release-linux-files-attempt-${{ github.run_attempt }}
           path: |
             dist/rolauncher-v*-linux-x64.tar.gz
             dist/rolauncher-v*-linux-SHA256SUMS.txt
@@ -151,26 +149,3 @@ jobs:
           path: |
             target/linux-ui-preview/*.png
             target/linux-ui-preview/*.txt
-
-  release:
-    name: Publish stable release
-    needs: [windows-checks, linux-checks]
-    if: github.ref == 'refs/heads/main' && github.event_name != 'pull_request'
-    runs-on: ubuntu-latest
-    timeout-minutes: 15
-    permissions:
-      contents: write
-    concurrency:
-      group: publish-stable-release
-      cancel-in-progress: false
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/download-artifact@v4
-        with:
-          pattern: release-*
-          merge-multiple: true
-          path: dist
-      - name: Publish verified assets and versioned changelog
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: python3 scripts/publish-release.py

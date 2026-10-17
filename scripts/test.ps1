@@ -11,6 +11,12 @@ try {
     if ($LASTEXITCODE -ne 0) { throw 'Client evidence report checks failed' }
     & python "$PSScriptRoot\test-create-archive.py"
     if ($LASTEXITCODE -ne 0) { throw 'ZIP packaging checks failed' }
+    & python "$PSScriptRoot\test-release-promotion.py"
+    if ($LASTEXITCODE -ne 0) { throw 'Release promotion checks failed' }
+    & python "$PSScriptRoot\test-hotfix-policy.py"
+    if ($LASTEXITCODE -ne 0) { throw 'Hotfix policy checks failed' }
+    & python "$PSScriptRoot\test-owner-evidence.py"
+    if ($LASTEXITCODE -ne 0) { throw 'Owner evidence checks failed' }
     & cargo test --locked
     if ($LASTEXITCODE -ne 0) { throw 'Tests failed' }
     & cargo fmt --check
@@ -20,7 +26,11 @@ try {
     & dotnet run --project desktop.tests/RoLauncher.Desktop.Tests.csproj --no-restore
     if ($LASTEXITCODE -ne 0) { throw 'Desktop checks failed' }
     & "$PSScriptRoot\build-desktop.ps1" -Smoke -OutputDirectory 'target\ui-smoke'
-    & python "$PSScriptRoot\ui-smoke.py"
+    $taskSmokeFixture = Join-Path $PSScriptRoot 'test-ui-smoke.py'
+    if (-not (Test-Path -LiteralPath $taskSmokeFixture)) {
+        $taskSmokeFixture = Join-Path $PSScriptRoot 'ui-smoke.py'
+    }
+    & python $taskSmokeFixture
     if ($LASTEXITCODE -ne 0) { throw 'WinUI smoke test failed' }
     $env:ROLAUNCHER_DESKTOP_TEST_EXE = Join-Path $taskRoot 'target\ui-smoke\RoLauncher.Desktop.exe'
     $env:ROLAUNCHER_UI_SMOKE_DIR = Join-Path $taskRoot 'target\ui-bridge'
