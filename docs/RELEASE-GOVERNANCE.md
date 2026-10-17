@@ -9,7 +9,7 @@ See [Hotfix strategy](HOTFIX-RELEASE-STRATEGY.md) for transition, settings, evid
 2. A separate `workflow_run` publisher checks out the trusted default-branch event SHA, never the candidate SHA.
 3. It reads candidate files and archives as data, verifies authority and evidence, then uploads without executing candidate code.
 
-Only the publishing job requests contents-write, Actions-read and PR-read.
+Only the publishing job requests contents-write, Actions-read, PR-read and Issues-read.
 The workflow's literal `false` guard and missing/false `RELEASE_PROMOTION_ENABLED` each prevent activation.
 Neither successful CI nor a branch name grants publication authority.
 
@@ -101,6 +101,20 @@ The published baseline may advance to the exact target solely to reconcile its m
 The final gate repeats authority, main-head, active Rulesets, workflow state and source-run checks.
 GitHub API operations are not atomic; emergency disable must cancel running jobs as well as disable the workflow.
 Native release immutability, owner/default-branch trust and independent activation proof remain required.
+
+## Owner-signed live controls
+
+See [owner evidence protocol and operations](OWNER-EVIDENCE.md) and the separately authorized [sandbox lifecycle plan](SANDBOX-RELEASE-LIFECYCLE.md).
+Production policy is deliberately unenrolled: no key, inbox or public disclosure approval.
+Literal `false &&` remains, and activation variable must remain absent pending separate owner authorization.
+
+Read-only admission precedes two attended challenge-artifact/Issue-response gates, with pinned OpenSSH signatures and exact source/run/attempt/receipt binding.
+Both gates use complete fresh Ruleset/bypass evidence with `protected_branches(strict=True)` and signed live native immutability settings.
+Feature and beta source authority remain unchanged; missing bypass evidence no longer qualifies through administrative attestation.
+
+Each write requires unexpired evidence; final publication rechecks source authority, checks, tag, release and asset identity after attendance.
+Published and consumed releases require separate `immutable: true` readback; identical consumed reconciliation performs no writes.
+Independent review, signing policy enrollment, public disclosure approval, real sandbox lifecycle proof and separate activation authorization remain outstanding.
 
 ## Beta compatibility
 

@@ -114,6 +114,7 @@ jobs:
           python3 scripts/test-publish-beta.py
           python3 scripts/test-release-promotion.py
           python3 scripts/test-hotfix-policy.py
+          python3 scripts/test-owner-evidence.py
           python3 scripts/test-sober-isolation-adapter.py
           dotnet restore desktop.tests/RoLauncher.Desktop.Tests.csproj --locked-mode --configfile desktop/NuGet.Config
           dotnet run --project desktop.tests --no-restore -c Release

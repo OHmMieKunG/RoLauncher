@@ -9,11 +9,12 @@ from pathlib import Path
 import unittest
 import zipfile
 
-from release_promotion import authorize, promote
+from release_promotion import authorize
 
 spec = importlib.util.spec_from_file_location("promotion_tests", Path(__file__).with_name("test-release-promotion.py"))
 reference = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(reference)
+promote = reference.promote
 SHA, PATH = reference.SHA, reference.PATH
 BASELINE, BASE, REVIEWED, HEAD = (c * 40 for c in "cdef")
 FILE = dict(filename="src/updates.rs", status="modified", sha="1" * 40,

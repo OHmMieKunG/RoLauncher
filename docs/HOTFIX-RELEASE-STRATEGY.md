@@ -85,9 +85,11 @@ No setting was changed, and activation remains blocked.
 9. Export effective Ruleset IDs, scope, checks, integration IDs, strictness, bypass lists, reviewer and date; reverify after access/control changes.
 10. Prove runtime token can read required evidence without Administration/write secrets; then separately approve activation PR and `RELEASE_PROMOTION_ENABLED=true`.
 
-Hotfix runtime denies omitted branch/tag bypass evidence, unlike PR01 feature-mode's explicit administrative-attestation boundary.
+Production integration denies omitted branch/tag bypass evidence for every channel; original PR01 feature-mode's administrative-attestation fallback no longer authorizes publication.
 GitHub documents that [bypass lists require ruleset write access](https://docs.github.com/en/rest/repos/rules#get-a-repository-ruleset); minimal publisher credentials may therefore be insufficient.
-**Unresolved activation blocker:** prove a least-privilege evidence route in a disposable repository; do not add an admin token or weaken this guard to force activation.
+Architecture C's non-publishing sandbox proof validated owner CLI/OpenSSH evidence transport in [run 39030105254](https://github.com/oangsa/RoLauncher-release-sandbox/actions/runs/39030105254).
+The [production integration](OWNER-EVIDENCE.md) keeps privileged credentials local and strict verification intact; signing policy remains unenrolled and publisher hard-disabled.
+Full [sandbox lifecycle verification](SANDBOX-RELEASE-LIFECYCLE.md), independent review, public disclosure/key enrollment and separate activation approval remain blockers; the protocol proof did not publish a release or establish real tag enforcement.
 
 ## Future patch procedure — commands not executed
 
