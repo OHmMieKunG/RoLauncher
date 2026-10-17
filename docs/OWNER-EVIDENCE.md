@@ -43,6 +43,18 @@ A public inbox discloses Ruleset definitions, bypass actor identifiers, source/i
 Before enrollment, owner must separately approve that disclosure and choose an open Issue dedicated to evidence.
 Both reviewed policy `public_disclosure_approved: true` and helper `--approve-public-evidence` are required; this PR leaves them unconfigured.
 
+Public disclosure has a separate fail-closed boundary, independent of release-path protection checks.
+Policy `disclosure_sha256` must pin SHA256 of the canonical **entire collected controls snapshot**, including all active, inactive and inherited Rulesets, effective branch rules and immutable settings.
+The helper validates before displaying controls, signing or posting; the publisher repeats validation on authenticated evidence at both gates.
+
+Every bypass actor must have exactly `actor_type`, `actor_id`, and `bypass_mode`: only `RepositoryRole`, integer `5`, `always` is a permitted disclosure category.
+User, Team, App/Integration, unknown actors, extra actor fields and all other identities/modes are rejected, including on unrelated Rulesets; this does not authorize a bypass on protected paths.
+Inventory and Ruleset envelope fields are exact; every nested condition, rule parameter and effective branch field is covered by the reviewed snapshot digest.
+
+No fields are redacted, and the complete collected snapshot remains the input to unchanged strict verification.
+Any changed value, new Ruleset, field or public evidence category fails against the pinned digest and requires separate owner disclosure review through a governance PR; adding an actor category also requires reviewed validator changes.
+Generic `SIGN` confirmation cannot approve extra disclosure, and no helper response automatically updates policy.
+
 The helper endpoint allowlist permits repository reads and one mutation: a comment POST to the pinned inbox.
 No release, tag, Ruleset mutation, credential export or shell interpolation is implemented in the helper.
 Payloads are limited to 32 KiB, comments to 48 KiB, challenge ZIPs to 64 KiB, challenge JSON to 16 KiB, and owner CLI responses to 2 MiB.
@@ -109,10 +121,15 @@ Local policy must match the trusted workflow checkout's policy digest exactly.
 2. Separately approve public disclosure and create/designate the production inbox; do not reuse sandbox Issue #1.
 3. On a trusted owner workstation, create a **new dedicated encrypted Ed25519 signing key**, after explicit provisioning approval; never reuse the sandbox or unit-test keys.
 4. Inspect its public key and fingerprint using `ssh-keygen -lf PATH.pub`; verify out of band during review.
-5. Through a reviewed governance PR, set inbox number, disclosure approval, and public `ssh-ed25519 BASE64` in `.github/owner-evidence-policy.json`.
-6. Keep private key and passphrase outside checkout, build artifacts and GitHub secrets; do not upload the key to GitHub account authentication/signing-key settings.
-7. Independently verify owner CLI can retrieve all explicit bypass arrays, including an intentionally nonempty canary in sandbox, and `/immutable-releases` settings.
-8. Review enrollment exact commit; keep publisher hard-disabled until lifecycle proof and a separately authorized activation PR/settings action.
+5. Locally collect the complete controls snapshot without signing/posting; independently inspect **every** inventory/detail/branch/settings field for confidential information, including unrelated/inactive/inherited Rulesets.
+6. Through a reviewed governance PR, set inbox number, disclosure approval, public `ssh-ed25519 BASE64`, and `disclosure_sha256` computed with `owner_evidence.digest(snapshot)` in `.github/owner-evidence-policy.json`; this PR leaves the digest `null`.
+7. Keep private key and passphrase outside checkout, build artifacts and GitHub secrets; do not upload the key to GitHub account authentication/signing-key settings.
+8. Independently verify owner CLI can retrieve all explicit bypass arrays, including an intentionally nonempty canary in sandbox, and `/immutable-releases` settings.
+9. Review enrollment exact commit; keep publisher hard-disabled until lifecycle proof and a separately authorized activation PR/settings action.
+
+Compute the digest only after independent local snapshot review; never publish a rejected snapshot merely to request approval.
+The digest is disclosure authorization, not cached runtime evidence: both gates still collect fresh live data and signatures.
+Operational cost: any Ruleset/effective-rule/settings change requires a reviewed digest update before release; inherited changes can block publication until reviewed.
 
 For planned rotation, enroll a second verified public key through review, test it, then remove the old public key and add its `SHA256:...` fingerprint to `revoked`.
 Maximum four active entries; revoked fingerprints override enrolled keys.
@@ -138,7 +155,9 @@ Audit artifacts retain challenges, signed payloads, signatures and accepted comm
 
 ## Implementation verification
 
-Local Windows Python 3.13/OpenSSH tests: 30 release-promotion, 14 hotfix-policy, 6 legacy beta and 21 owner-evidence tests passed (71 total).
+Original implementation validation: 30 release-promotion, 14 hotfix-policy, 6 legacy beta and 21 owner-evidence tests passed (71 total).
+F-01 adds regressions for unrelated active/inactive Rulesets with User/Team/App/Integration actors, unknown/confidential fields, zero signing/comment POST/publication writes on helper rejection, and disclosure rejection at both publisher gates.
+The revised suite contains 25 owner-evidence tests (75 governance/beta tests total), including expiry after a committed upload, fresh-attempt recovery and preservation of existing asset identities/bytes.
 The new suite uses temporary, automatically deleted unit-test keys and in-memory GitHub fixtures; it makes no network requests or production enrollment changes.
 Release/version consistency and `git diff --check` also passed.
 

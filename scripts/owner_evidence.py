@@ -64,11 +64,14 @@ def parse(data, limit=MAX_MESSAGE):
 def load_policy(path=POLICY):
     p = parse(Path(path).read_bytes())
     require(set(p) == {'schema', 'repository_id', 'owner_id', 'inbox', 'public_disclosure_approved',
-                       'keys', 'revoked'} and type(p['schema']) is int and p['schema'] == 1
+                       'keys', 'revoked', 'disclosure_sha256'} and type(p['schema']) is int and p['schema'] == 1
             and type(p['repository_id']) is int and p['repository_id'] == REPO_ID
             and type(p['owner_id']) is int and p['owner_id'] == OWNER, 'Evidence policy identity')
     require(type(p['inbox']) is int and p['inbox'] > 0 and p['public_disclosure_approved'] is True,
             'Separate owner approval and reviewed public inbox enrollment required')
+    require(isinstance(p['disclosure_sha256'], str)
+            and re.fullmatch('[a-f0-9]{64}', p['disclosure_sha256']),
+            'Reviewed exact public disclosure snapshot required')
     require(isinstance(p['keys'], list) and 0 < len(p['keys']) <= 4
             and isinstance(p['revoked'], list) and len(p['revoked']) <= 100, 'Signing keys not enrolled')
     require(all(isinstance(k, str) and re.fullmatch(r'ssh-ed25519 [A-Za-z0-9+/]{68}', k)
@@ -157,6 +160,35 @@ def controls_call(call, snapshot):
     return evidence
 
 
+def validate_disclosure(snapshot, policy):
+    """Separate public-disclosure authority: approve exact bytes, never filter evidence.
+
+    The reviewed digest covers ALL nested fields, inactive/inherited Rulesets and
+    effective branch rules. Any new category or value requires policy review.
+    Actor validation additionally forbids identity-bearing actor categories even
+    if someone tries to enroll their digest without changing this reviewed code.
+    """
+    require(isinstance(snapshot, dict)
+            and set(snapshot) == {'inventory', 'rulesets', 'branches', 'immutable'}
+            and isinstance(snapshot['inventory'], list) and isinstance(snapshot['rulesets'], list),
+            'Public disclosure snapshot contract')
+    for summary in snapshot['inventory']:
+        require(isinstance(summary, dict) and set(summary) == set(SUMMARY),
+                'Unexpected public inventory fields')
+    for ruleset in snapshot['rulesets']:
+        require(isinstance(ruleset, dict) and set(ruleset) == set(FIELDS) | {'bypass_actors'}
+                and isinstance(ruleset['bypass_actors'], list), 'Unexpected public Ruleset fields')
+        for actor in ruleset['bypass_actors']:
+            require(isinstance(actor, dict)
+                    and set(actor) == {'actor_type', 'actor_id', 'bypass_mode'}
+                    and actor['actor_type'] == 'RepositoryRole'
+                    and type(actor['actor_id']) is int and actor['actor_id'] == 5
+                    and actor['bypass_mode'] == 'always', 'Public bypass actor disclosure denied')
+    approved = policy.get('disclosure_sha256')
+    require(isinstance(approved, str) and re.fullmatch('[a-f0-9]{64}', approved)
+            and digest(snapshot) == approved, 'Public disclosure snapshot differs from reviewed policy')
+
+
 def ssh():
     executable = shutil.which('ssh-keygen')
     if not executable and os.name == 'nt':
@@ -207,6 +239,7 @@ def verify(response, challenge, consumed, policy_path=POLICY, now=None):
             and end - start <= 45 and expires == start + TTL and now <= expires, 'Expired, future or slow evidence')
     require(challenge['nonce'] not in consumed, 'Evidence replay rejected')
     require(isinstance(value['controls'], dict), 'Invalid controls object')
+    validate_disclosure(value['controls'], p)
     consumed.add(challenge['nonce'])
     return value
 
@@ -470,6 +503,7 @@ def attend(args):
                     == f'APPROVE {phase} {args.version}', 'Owner declined gate')
             start = int(time.time())
             snapshot = collect(gh_api)
+            validate_disclosure(snapshot, p)  # Before display, signing or any public POST.
             from release_promotion import protected_branches
             protected_branches(controls_call(gh_api, snapshot), strict=True)
             print(json.dumps(snapshot, indent=2), flush=True)

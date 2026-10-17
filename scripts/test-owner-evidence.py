@@ -12,6 +12,7 @@ import sys
 import tempfile
 import time
 import unittest
+from types import SimpleNamespace
 from unittest.mock import patch
 import zipfile
 
@@ -89,6 +90,8 @@ class OwnerEvidenceTests(unittest.TestCase):
         self.env.start()
         self.addCleanup(self.env.stop)
         self.api = LiveFixture()
+        self.policy['disclosure_sha256'] = evidence.digest(evidence.collect(self.api.full))
+        self.write_policy()
         self.state = self.root / 'state'
 
     def write_policy(self):
@@ -307,6 +310,31 @@ class OwnerEvidenceTests(unittest.TestCase):
         for name, value in original.items():
             self.assertEqual(self.api.assets[name], value)
 
+    def test_expiry_during_upload_stops_later_writes_and_fresh_attempt_recovers(self):
+        self.post(self.prepare())
+        transport = self.transport('stage')
+        uploads = []
+        def expire_after_committed_upload(path, method='GET', body=None, **kwargs):
+            value = self.api(path, method, body, **kwargs)
+            if method == 'POST' and path.startswith('https://uploads.github.com/'):
+                uploads.append(path)
+                transport.expires = int(time.time()) - 1
+            return value
+        with self.assertRaisesRegex(ValueError, 'expired'):
+            promotion.promote(expire_after_committed_upload, self.api.run, transport)
+        self.assertEqual(len(uploads), 1)
+        self.assertTrue(self.api.release['draft'])
+        original = copy.deepcopy(self.api.assets)
+        self.api.writes.clear()
+        self.state = self.root / 'fresh-after-expiry'
+        os.environ['GITHUB_RUN_ATTEMPT'] = '2'
+        self.assertEqual(self.complete(), 'published')
+        for name, asset in original.items():
+            self.assertEqual(self.api.assets[name], asset)
+            self.assertFalse(any(write[1] == 'POST' and write[0].endswith('?name=' + name)
+                                 for write in self.api.writes))
+        self.assertFalse(any(write[1] == 'DELETE' for write in self.api.writes))
+
     def test_authority_change_during_owner_wait_produces_zero_writes(self):
         c = self.prepare()
         self.post(c)
@@ -359,6 +387,104 @@ class OwnerEvidenceTests(unittest.TestCase):
         self.assertEqual(promotion.promote(self.api, self.api.run, self.transport('prepare')), 'no-intent')
         self.assertFalse(self.state.exists())
         self.assertEqual(self.api.writes, [])
+
+    def test_unrelated_inactive_actor_disclosure_denied_before_sign_post_or_publish(self):
+        c = self.prepare()
+        original = self.api.full
+        for enforcement in ('active', 'disabled', 'evaluate'):
+            for actor_type in ('User', 'Team', 'Integration', 'App'):
+                with self.subTest(enforcement=enforcement, actor_type=actor_type):
+                    extra = dict(id=3, source=evidence.REPO, source_type='Repository', target='tag',
+                                 enforcement=enforcement,
+                                 conditions={'ref_name': {'include': ['refs/tags/unrelated-*'], 'exclude': []}},
+                                 rules=[], bypass_actors=[dict(actor_type=actor_type, actor_id=123, bypass_mode='always')])
+                    def full(path):
+                        if path.startswith('/rulesets?'):
+                            return original(path) + [evidence.project(extra, evidence.SUMMARY)]
+                        if path == '/rulesets/3': return copy.deepcopy(extra)
+                        return original(path)
+                    with patch.object(self.api, 'full', side_effect=full):
+                        # Reproduce F-01: existing release-path validation accepts this unrelated Ruleset.
+                        promotion.protected_branches(full, strict=True)
+                        snapshot = evidence.collect(full)
+                        with self.assertRaisesRegex(ValueError, 'actor disclosure'):
+                            evidence.validate_disclosure(snapshot, self.policy)
+                        self.api.comments.clear()
+                        self.post(c)  # Authenticated but disallowed complete snapshot also fails at publisher.
+                        with self.assertRaisesRegex(ValueError, 'actor disclosure'):
+                            promotion.promote(self.api, self.api.run, self.transport('stage'))
+                        posts = []
+                        def helper_api(path, body=None, **kwargs):
+                            if body is not None:
+                                posts.append(path)
+                                raise AssertionError('Public POST must not occur')
+                            if path == 'user': return dict(id=evidence.OWNER, login='oangsa')
+                            if path == '/issues/1': return dict(number=1, state='open')
+                            if path == '/actions/runs/99':
+                                return dict(path=evidence.WORKFLOW, event='workflow_run', head_branch='main',
+                                            head_sha='d' * 40, repository={'id': evidence.REPO_ID},
+                                            head_repository={'id': evidence.REPO_ID}, run_attempt=1, status='in_progress')
+                            return full(path)
+                        args = SimpleNamespace(approve_public_evidence=True, key=str(self.key), run_id=99,
+                                               trusted_sha='d' * 40, source_sha=c['binding']['source']['head_sha'],
+                                               version=c['binding']['intent']['version'])
+                        with patch.object(evidence, 'load_policy', return_value=(self.policy, [self.public])), \
+                                patch.object(evidence, 'gh_api', side_effect=helper_api), \
+                                patch.object(evidence, 'download_challenge', return_value=c), \
+                                patch('builtins.input', return_value=f'APPROVE preflight {args.version}'), \
+                                patch('builtins.print'), patch.object(evidence, 'sign') as signing:
+                            with self.assertRaisesRegex(ValueError, 'actor disclosure'):
+                                evidence.attend(args)
+                            signing.assert_not_called()
+                        self.assertEqual(posts, [])
+                        self.assertEqual(self.api.writes, [])
+
+    def test_disclosure_exact_snapshot_unknown_fields_and_confidential_values_fail_closed(self):
+        snapshot = evidence.collect(self.api.full)
+        before = copy.deepcopy(snapshot)
+        evidence.validate_disclosure(snapshot, self.policy)
+        self.assertEqual(snapshot, before)  # Never redact or modify strict evidence.
+        for fault in ('rule-field', 'condition', 'branch-field', 'immutable-field', 'inventory-field',
+                      'ruleset-field', 'actor-field', 'actor-boolean', 'new-empty-ruleset'):
+            value = copy.deepcopy(snapshot)
+            if fault == 'rule-field': value['rulesets'][0]['rules'].append({'type': 'unknown', 'secret': 'confidential'})
+            if fault == 'condition': value['rulesets'][0]['conditions']['confidential'] = 'internal-team-name'
+            if fault == 'branch-field': value['branches']['dev'][0]['confidential'] = 'private'
+            if fault == 'immutable-field': value['immutable']['unexpected'] = True
+            if fault == 'inventory-field': value['inventory'][0]['unexpected'] = 'private'
+            if fault == 'ruleset-field': value['rulesets'][0]['unexpected'] = 'private'
+            if fault.startswith('actor-'):
+                actor = dict(actor_type='RepositoryRole', actor_id=5, bypass_mode='always')
+                if fault == 'actor-field': actor['name'] = 'private'
+                else: actor['actor_id'] = True
+                value['rulesets'][0]['bypass_actors'] = [actor]
+            if fault == 'new-empty-ruleset': value['rulesets'].append(copy.deepcopy(value['rulesets'][0]))
+            with self.subTest(fault=fault), self.assertRaises(ValueError):
+                evidence.validate_disclosure(value, self.policy)
+            self.assertEqual(self.api.writes, [])
+        # Even an accidentally approved digest cannot disclose identity-bearing actor categories.
+        value = copy.deepcopy(snapshot)
+        value['rulesets'][0]['bypass_actors'] = [dict(actor_type='Team', actor_id=1, bypass_mode='always')]
+        with self.assertRaisesRegex(ValueError, 'actor disclosure'):
+            evidence.validate_disclosure(value, dict(self.policy, disclosure_sha256=evidence.digest(value)))
+
+    def test_disclosure_change_requires_new_review_and_both_gate_checks(self):
+        c = self.prepare()
+        self.post(c)
+        final = self.stage()
+        def change(payload):
+            payload['controls']['rulesets'][0]['conditions']['confidential'] = 'new-category'
+        self.post(final, self.response(final, change))
+        before = list(self.api.writes)
+        with self.assertRaisesRegex(ValueError, 'disclosure snapshot'):
+            promotion.promote(self.api, self.api.run, self.transport('finish'))
+        self.assertEqual(self.api.writes, before)
+        self.assertTrue(self.api.release['draft'])
+        changed = evidence.collect(self.api.full)
+        changed['immutable']['enforced_by_owner'] = True
+        with self.assertRaisesRegex(ValueError, 'disclosure snapshot'):
+            evidence.validate_disclosure(changed, self.policy)
+        evidence.validate_disclosure(changed, dict(self.policy, disclosure_sha256=evidence.digest(changed)))
 
     def test_nested_source_linux_attempt_and_intent_binding(self):
         c = self.prepare()

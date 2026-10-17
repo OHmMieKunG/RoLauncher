@@ -50,6 +50,30 @@ A real HTTP fault proxy or instrumented sandbox-only API adapter must record eac
 Offline fixtures alone do not prove GitHub's real permissions, immutable-release behavior or partial publication semantics.
 Capture denied request status codes and before/after resource hashes without logging tokens or authenticated storage URLs.
 
+## Production-shaped upload freshness and recovery (F-02)
+
+This matrix is a plan only: synthetic publishing and failure injection still require the separate sandbox authorization above.
+Keep evidence TTL at **120 seconds**; do not extend it to make uploads pass.
+An upload admitted while evidence is fresh can finish after expiry; no later mutation is authorized by expired evidence, and publication always needs a new final gate.
+
+1. Package synthetic Windows installer/portable/source ZIP and Linux TAR.GZ using the production asset names, checksums and receipt contract, without production application/source identities.
+2. Record current production-shaped compressed sizes locally, then test at least those sizes and a 2x-size stress case; include a Windows asset of at least 256 MiB and Linux asset of at least 128 MiB, within actual API/artifact limits.
+3. Upload builder artifacts through real Actions, record GitHub artifact digests, and verify publisher download limits, archive inventory, checksum/source checks and memory/time behavior before any release mutation.
+4. Pin and independently review the full sandbox disclosure snapshot digest; no sandbox response may disclose unapproved categories.
+5. Use a sandbox-only bounded adapter to delay upload requests/responses so evidence expires (a) before the first asset POST, (b) between assets, and (c) during one in-flight upload; retain real GitHub API calls and a timestamped mutation ledger.
+6. For (a), require zero asset POSTs; for (b), no further mutation after freshness rejection; for (c), permit only the already admitted in-flight request to finish, then require no subsequent mutation under expired evidence.
+7. Interrupt connections before server acceptance and after committed upload with a lost response; inspect GitHub state without replaying POST automatically. Incomplete, unexpected or mismatched asset bytes must quarantine rather than be replaced.
+8. Start a fresh publisher run/attempt for each recovery, collect a new preflight signature, and verify exact source, intent, source CI/Linux attempts and byte-identical deterministic receipt; publisher run/attempt changes must not change the receipt identity.
+9. Require existing matching asset IDs, sizes and downloaded SHA256 to remain unchanged; ledger may contain uploads only for missing names, with no DELETE, replacement, renamed duplicate or tag rewrite.
+10. Repeat expired recovery until the complete draft is staged; if one asset cannot fit supported transport/timeout limits or fresh retries cannot make progress, report a production activation blocker rather than weaken TTL or integrity checks.
+11. Obtain the new final challenge **after** complete staging, sign fresh final live controls, and verify complete draft/receipt/tag readback before the sole publication PATCH.
+12. Expire or interrupt final evidence before PATCH: require the draft remains unpublished and a fresh attended run is needed. Lose PATCH response after server commit: require fresh-run consumed reconciliation, exact receipt/assets, immutable readback and zero mutation calls.
+13. Separately GET the published Release and require `immutable: true`; download and hash all assets, resolve exact tag/source, and perform the separately approved denied replacement/deletion checks.
+
+Record asset names/sizes/IDs/SHA256, receipt bytes, evidence collection/expiry times, request start/end times, run/attempt URLs, actual HTTP outcomes and before/after resource hashes.
+Do not log credentials, authenticated upload/download URLs or private keys; distinguish offline fault coverage from real API results.
+Success requires both Windows and Linux large assets, expired and interrupted recovery, a fresh final gate, immutable readback, unchanged existing assets and a zero-write consumed retry.
+
 ## Acceptance and cleanup
 
 Attach exact workflow/source commits, run URLs/attempts, owner helper platform/OpenSSH versions, Ruleset exports, signed challenges/responses, API status evidence, asset downloads and mutation ledger.
