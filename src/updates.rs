@@ -27,31 +27,53 @@ pub fn validate_repository(repository: &str) -> Result<(), String> {
     }
     Ok(())
 }
-fn version(value: &str) -> Result<(u64, u64, u64), String> {
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
+struct Version {
+    core: (u64, u64, u64),
+    channel: u8,
+    beta: u64,
+}
+fn version(value: &str) -> Result<Version, String> {
     let v = value.strip_prefix('v').unwrap_or(value);
-    let parts = v.split('.').collect::<Vec<_>>();
+    let (base, channel, beta) = if let Some((base, beta)) = v.split_once("-beta.") {
+        if beta.is_empty() || beta.starts_with('0') || !beta.bytes().all(|c| c.is_ascii_digit()) {
+            return Err("Invalid beta version".into());
+        }
+        (base, 1, beta.parse().map_err(|_| "Invalid beta version")?)
+    } else if let Some((base, hash)) = v.split_once("-dev.") {
+        if hash.len() != 12
+            || !hash
+                .bytes()
+                .all(|c| c.is_ascii_hexdigit() && !c.is_ascii_uppercase())
+        {
+            return Err("Invalid development version".into());
+        }
+        (base, 0, 0)
+    } else {
+        (v, 2, 0)
+    };
+    let parts = base.split('.').collect::<Vec<_>>();
     if parts.len() != 3
-        || parts
-            .iter()
-            .any(|p| p.is_empty() || !p.bytes().all(|c| c.is_ascii_digit()))
+        || parts.iter().any(|p| {
+            p.is_empty()
+                || p.len() > 1 && p.starts_with('0')
+                || !p.bytes().all(|c| c.is_ascii_digit())
+        })
     {
         return Err("Release tag must be MAJOR.MINOR.PATCH".into());
     }
-    Ok((
-        parts[0].parse().map_err(|_| "Invalid release version")?,
-        parts[1].parse().map_err(|_| "Invalid release version")?,
-        parts[2].parse().map_err(|_| "Invalid release version")?,
-    ))
+    Ok(Version {
+        core: (
+            parts[0].parse().map_err(|_| "Invalid release version")?,
+            parts[1].parse().map_err(|_| "Invalid release version")?,
+            parts[2].parse().map_err(|_| "Invalid release version")?,
+        ),
+        channel,
+        beta,
+    })
 }
-fn newer_than_current(candidate: (u64, u64, u64), current: &str) -> Result<bool, String> {
-    let (base, development) = match current.split_once("-dev.") {
-        Some((base, hash)) if hash.len() == 12 && hash.bytes().all(|c| c.is_ascii_hexdigit()) => {
-            (base, true)
-        }
-        _ => (current, false),
-    };
-    let current = version(base)?;
-    Ok(candidate > current || (development && candidate == current))
+fn newer_than_current(candidate: Version, current: &str) -> Result<bool, String> {
+    Ok(candidate > version(current)?)
 }
 #[derive(Deserialize)]
 pub struct RepositoryPatch {
@@ -79,25 +101,42 @@ pub struct UpdateView {
     pub installer_url: String,
     pub prerelease: bool,
 }
-fn release_version(value: &Release, include_beta: bool) -> Result<(u64, u64, u64), String> {
+fn release_version(value: &Release, include_beta: bool) -> Result<Version, String> {
     if value.draft || (value.prerelease && !include_beta) {
         return Err("This release is excluded from the selected update channel".into());
     }
     if value.prerelease {
-        version(
-            value
-                .tag_name
-                .strip_prefix("beta-v")
-                .ok_or("Unsupported beta release tag")?,
-        )
+        if let Some(legacy) = value.tag_name.strip_prefix("beta-v") {
+            let mut parsed = version(legacy)?;
+            if parsed.channel != 2 {
+                return Err("Unsupported legacy beta tag".into());
+            }
+            parsed.channel = 1;
+            Ok(parsed)
+        } else {
+            let parsed = version(&value.tag_name)?;
+            if parsed.channel != 1 {
+                return Err("Unsupported beta release tag".into());
+            }
+            Ok(parsed)
+        }
     } else {
-        version(&value.tag_name)
+        let parsed = version(&value.tag_name)?;
+        if parsed.channel != 2 {
+            return Err("Stable release requires a numeric version".into());
+        }
+        Ok(parsed)
     }
 }
 fn parse_release(repo: &str, value: Release, include_beta: bool) -> Result<UpdateView, String> {
     validate_repository(repo)?;
     let number = release_version(&value, include_beta)?;
-    let release_version = format!("{}.{}.{}", number.0, number.1, number.2);
+    let release_version = value
+        .tag_name
+        .strip_prefix("beta-v")
+        .or_else(|| value.tag_name.strip_prefix('v'))
+        .unwrap_or(&value.tag_name)
+        .to_owned();
     let asset = |suffix: &str| -> Result<String, String> {
         let name = format!("rolauncher-v{release_version}-{suffix}");
         let expected = format!(
@@ -304,11 +343,11 @@ mod tests {
         assert_eq!(repository_or_default(""), DEFAULT_REPOSITORY);
         assert!(version("1.10.0").unwrap() > version("1.9.9").unwrap());
         assert!(version("1.1.0-beta").is_err());
-        assert!(newer_than_current((1, 4, 0), "1.4.0-dev.123456abcdef").unwrap());
-        assert!(!newer_than_current((1, 3, 0), "1.4.0-dev.123456abcdef").unwrap());
-        assert!(!newer_than_current((1, 4, 0), "1.4.0").unwrap());
-        assert!(newer_than_current((1, 5, 0), "1.4.0-dev.123456abcdef").unwrap());
-        assert!(newer_than_current((1, 4, 0), "1.4.0-dev.invalid").is_err());
+        assert!(newer_than_current(version("1.4.0").unwrap(), "1.4.0-dev.123456abcdef").unwrap());
+        assert!(!newer_than_current(version("1.3.0").unwrap(), "1.4.0-dev.123456abcdef").unwrap());
+        assert!(!newer_than_current(version("1.4.0").unwrap(), "1.4.0").unwrap());
+        assert!(newer_than_current(version("1.5.0").unwrap(), "1.4.0-dev.123456abcdef").unwrap());
+        assert!(newer_than_current(version("1.4.0").unwrap(), "1.4.0-dev.invalid").is_err());
         let mut bad = make();
         bad.assets
             .iter_mut()
@@ -322,5 +361,37 @@ mod tests {
         let mut missing = make();
         missing.assets.pop();
         assert!(parse_release("owner/repo", missing, false).is_err());
+    }
+    #[test]
+    fn numbered_betas_sort_numerically_and_stable_replaces_matching_beta_and_dev() {
+        let beta = version("1.8.4-beta.10").unwrap();
+        assert!(newer_than_current(beta, "1.8.4-beta.2").unwrap());
+        assert!(newer_than_current(beta, "1.8.4-dev.123456abcdef").unwrap());
+        assert!(!newer_than_current(beta, "1.8.4").unwrap());
+        assert!(newer_than_current(version("1.8.4").unwrap(), "1.8.4-beta.10").unwrap());
+        for bad in [
+            "1.8.4-beta.0",
+            "1.8.4-beta.01",
+            "1.8.4-beta.-1",
+            "1.8.4-beta.1+extra",
+        ] {
+            assert!(version(bad).is_err());
+        }
+        let selected = select_release(
+            "owner/repo",
+            vec![
+                fixture("v1.8.4-beta.2", true),
+                fixture("v1.8.4-beta.10", true),
+            ],
+        )
+        .unwrap();
+        assert_eq!(selected.version, "1.8.4-beta.10");
+        assert!(
+            selected
+                .installer_url
+                .contains("v1.8.4-beta.10/rolauncher-v1.8.4-beta.10-")
+        );
+        assert!(parse_release("owner/repo", fixture("v1.8.4-beta.1", true), false).is_err());
+        assert!(parse_release("owner/repo", fixture("v1.8.4-beta.1", false), true).is_err());
     }
 }

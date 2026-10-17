@@ -2,7 +2,7 @@
 
 Status: **not authorized or executed** by the implementation PR.
 Scope of any future approval must name only `oangsa/RoLauncher-release-sandbox` (ID `1423257712`).
-Production `oangsa/RoLauncher` must remain inaccessible to the test publisher and unchanged.
+Production fork `OHmMieKunG/RoLauncher` and upstream `oangsa/RoLauncher` must remain inaccessible to the test publisher and unchanged.
 
 ## Owner approval required
 

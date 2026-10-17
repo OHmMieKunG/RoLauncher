@@ -204,6 +204,69 @@ struct Original {
     affinity: Option<usize>,
     window: Option<(HWND, WINDOWPLACEMENT, bool)>,
 }
+impl Original {
+    fn saved(&self) -> crate::control_journal::Baseline {
+        crate::control_journal::Baseline {
+            power: self.power.map(|p| [p.Version, p.ControlMask, p.StateMask]),
+            memory_priority: self.memory_priority,
+            priority: self.priority,
+            affinity: self.affinity,
+            window: self.window.map(
+                |(hwnd, p, visible)| crate::control_journal::WindowBaseline {
+                    handle: hwnd as usize as u64,
+                    flags: p.flags,
+                    show: p.showCmd,
+                    minimum: [p.ptMinPosition.x, p.ptMinPosition.y],
+                    maximum: [p.ptMaxPosition.x, p.ptMaxPosition.y],
+                    rectangle: [
+                        p.rcNormalPosition.left,
+                        p.rcNormalPosition.top,
+                        p.rcNormalPosition.right,
+                        p.rcNormalPosition.bottom,
+                    ],
+                    visible,
+                },
+            ),
+        }
+    }
+    fn from_saved(b: crate::control_journal::Baseline) -> Self {
+        Self {
+            power: b.power.map(|p| PROCESS_POWER_THROTTLING_STATE {
+                Version: p[0],
+                ControlMask: p[1],
+                StateMask: p[2],
+            }),
+            memory_priority: b.memory_priority,
+            priority: b.priority,
+            affinity: b.affinity,
+            window: b.window.map(|w| {
+                (
+                    w.handle as usize as HWND,
+                    WINDOWPLACEMENT {
+                        length: size_of::<WINDOWPLACEMENT>() as u32,
+                        flags: w.flags,
+                        showCmd: w.show,
+                        ptMinPosition: POINT {
+                            x: w.minimum[0],
+                            y: w.minimum[1],
+                        },
+                        ptMaxPosition: POINT {
+                            x: w.maximum[0],
+                            y: w.maximum[1],
+                        },
+                        rcNormalPosition: RECT {
+                            left: w.rectangle[0],
+                            top: w.rectangle[1],
+                            right: w.rectangle[2],
+                            bottom: w.rectangle[3],
+                        },
+                    },
+                    w.visible,
+                )
+            }),
+        }
+    }
+}
 #[derive(Clone, Copy, PartialEq)]
 enum WindowPhase {
     MinimizeThenHide,
@@ -333,6 +396,9 @@ fn efficiency_status(process: &platform::ControlProcess) -> String {
 
 pub(crate) struct Managed {
     identity: ProcessIdentity,
+    process: Option<platform::ControlProcess>,
+    journal: Option<crate::control_journal::Journal>,
+    journal_error: Option<String>,
     original: Option<Original>,
     applied: Option<ResourceSettings>,
     applied_client: Option<ClientSettings>,
@@ -348,11 +414,15 @@ pub(crate) struct Managed {
     window_error: Option<String>,
     warnings: Vec<String>,
     restoring: bool,
+    applied_resource: Option<ResourceMode>,
 }
 impl Managed {
     pub(crate) fn new(identity: ProcessIdentity) -> Self {
         Self {
             identity,
+            process: None,
+            journal: None,
+            journal_error: None,
             original: None,
             applied: None,
             applied_client: None,
@@ -368,10 +438,76 @@ impl Managed {
             window_error: None,
             warnings: Vec::new(),
             restoring: false,
+            applied_resource: None,
         }
     }
     pub(crate) fn identity(&self) -> &ProcessIdentity {
         &self.identity
+    }
+    pub(crate) fn attach_journal_once(
+        &mut self,
+        directory: &std::path::Path,
+        account_id: &str,
+        require_existing: bool,
+    ) -> Result<(), String> {
+        if self.journal.is_some() {
+            return Ok(());
+        }
+        let journal = crate::control_journal::Journal::new(
+            directory,
+            account_id,
+            &self.identity,
+            platform::control_session(self.identity.pid)?,
+        )?;
+        match journal.load() {
+            Ok(None) if require_existing => {
+                self.journal_error = Some(
+                    "Restoration baseline unavailable for pre-existing client; no controls changed"
+                        .into(),
+                )
+            }
+            Ok(original) => self.original = original.map(Original::from_saved),
+            Err(error) => self.journal_error = Some(error),
+        }
+        self.journal = Some(journal);
+        Ok(())
+    }
+    pub(crate) fn discard_exited_journal(
+        &self,
+        directory: &std::path::Path,
+        account_id: &str,
+    ) -> Result<(), String> {
+        if !matches!(platform::alive(&self.identity), Ok(false)) {
+            return Ok(());
+        }
+        let journal = crate::control_journal::Journal::new(
+            directory,
+            account_id,
+            &self.identity,
+            platform::control_session(unsafe { GetCurrentProcessId() })?,
+        )?;
+        if journal.load()?.is_some() {
+            journal.remove()?;
+        }
+        Ok(())
+    }
+    fn persist(&self) -> Result<(), String> {
+        if let Some(error) = &self.journal_error {
+            return Err(error.clone());
+        }
+        if let (Some(journal), Some(original)) = (&self.journal, &self.original) {
+            journal.save(original.saved())?;
+        }
+        Ok(())
+    }
+    pub(crate) fn verified_process(&mut self) -> Result<platform::ControlProcess, String> {
+        if let Some(process) = &self.process {
+            process.check_identity(&self.identity)?;
+            return process.duplicate();
+        }
+        let process = platform::verify_controls(&self.identity, self.identity.generation)?;
+        self.process = Some(process.duplicate()?);
+        Ok(process)
     }
     pub(crate) fn activity_status(&self, result: &mut RuntimeControls) {
         result.input_result = self.last_input.clone();
@@ -610,7 +746,7 @@ impl Managed {
             .and_then(|o| o.window)
             .is_none_or(|(hwnd, original, visible)| {
                 if !window_owned(hwnd, self.identity.pid) {
-                    return true;
+                    return false;
                 }
                 let mut current: WINDOWPLACEMENT = unsafe { std::mem::zeroed() };
                 current.length = size_of::<WINDOWPLACEMENT>() as u32;
@@ -682,7 +818,7 @@ impl Managed {
         process: &platform::ControlProcess,
         settings: &ResourceSettings,
         effective: ResourceMode,
-    ) {
+    ) -> Result<(), String> {
         let efficient = effective == ResourceMode::LowResource;
         let original = self.original.get_or_insert_with(Original::default);
         if effective != ResourceMode::Normal && original.priority.is_none() {
@@ -726,6 +862,8 @@ impl Managed {
                 original.affinity = Some(previous);
             }
         }
+        self.persist()?;
+        let original = self.original.as_ref().unwrap();
         if let Some(value) = original.priority {
             let target = if effective == ResourceMode::Normal {
                 value
@@ -764,13 +902,14 @@ impl Managed {
                 self.warnings.push("Affinity request denied".into());
             }
         }
+        Ok(())
     }
-    fn policy_result(&self, process: &platform::ControlProcess) -> String {
+    fn policy_result(&self, process: &platform::ControlProcess) -> (String, bool) {
         let Some(settings) = &self.applied else {
-            return "Original settings restoration pending".into();
+            return ("Original settings restoration pending".into(), false);
         };
         let Some(client) = &self.applied_client else {
-            return "Client mode unavailable".into();
+            return ("Client mode unavailable".into(), false);
         };
         let effective = settings.effective_mode(client.mode);
         let mut warnings = self.warnings.clone();
@@ -832,19 +971,23 @@ impl Managed {
             ResourceMode::Balanced => "Balanced",
             ResourceMode::LowResource => "Low Resource",
         };
-        format!(
-            "{profile}{}; {phase}; {}{}; rendering remains unverified",
-            if client.mode == ClientMode::Headless {
-                " (automatic in Headless)"
-            } else {
-                ""
-            },
-            efficiency_status(process),
-            if warnings.is_empty() {
-                String::new()
-            } else {
-                format!("; partial optimization: {}", warnings.join("; "))
-            }
+        let verified = warnings.is_empty();
+        (
+            format!(
+                "{profile}{}; {phase}; {}{}; rendering remains unverified",
+                if client.mode == ClientMode::Headless {
+                    " (automatic in Headless)"
+                } else {
+                    ""
+                },
+                efficiency_status(process),
+                if warnings.is_empty() {
+                    String::new()
+                } else {
+                    format!("; partial optimization: {}", warnings.join("; "))
+                }
+            ),
+            verified,
         )
     }
     pub(crate) fn apply(
@@ -856,6 +999,9 @@ impl Managed {
         if let Err(error) = client.validate().and_then(|_| settings.validate()) {
             return error;
         }
+        if let Some(error) = &self.journal_error {
+            return error.clone();
+        }
         let changed = !self.matches_preferences(settings, client);
         if changed {
             self.cancel_activity(false);
@@ -865,6 +1011,7 @@ impl Managed {
                 .into();
         }
         let effective = settings.effective_mode(client.mode);
+        self.applied_resource = None;
         let normal =
             effective == ResourceMode::Normal && settings.affinity.is_none() && !client.auto_hide;
         if changed {
@@ -877,21 +1024,40 @@ impl Managed {
         } else {
             self.advance_window(process);
         }
+        if let Some((hwnd, _, _)) = self.original.as_ref().and_then(|o| o.window)
+            && !window_owned(hwnd, self.identity.pid)
+        {
+            self.cancel_window_transition();
+            self.window_error = None;
+            let replacement = match player_window(self.identity.pid) {
+                Ok(hwnd) => hwnd,
+                Err(error) => {
+                    self.restoring = normal;
+                    return format!("Window restoration unavailable: {error}");
+                }
+            };
+            self.original.as_mut().unwrap().window.as_mut().unwrap().0 = replacement;
+            if let Err(error) = self.persist() {
+                return error;
+            }
+        }
         if normal {
+            let captured = self.original.is_some();
             return match self.restore_with(process) {
-                Ok(()) => "Normal; original process and window settings restored".into(),
+                Ok(()) => {
+                    self.applied_resource = captured.then_some(ResourceMode::Normal);
+                    if captured {
+                        "Normal; original process and window settings restored".into()
+                    } else {
+                        "Normal; no captured restoration baseline; original settings unavailable"
+                            .into()
+                    }
+                }
                 Err(error) => format!("Restoring original settings: {error}"),
             };
         }
-        let window = self.original.as_ref().and_then(|o| o.window).map(|w| w.0);
-        let recreated = window.is_some_and(|hwnd| !window_owned(hwnd, self.identity.pid));
-        if recreated {
-            self.original.as_mut().unwrap().window = None;
-            self.cancel_window_transition();
-            self.window_error = None;
-        }
-        if changed || recreated {
-            self.apply_process(process, settings, effective);
+        if changed && let Err(error) = self.apply_process(process, settings, effective) {
+            return error;
         }
         if self.pending_window.is_none() && self.window_error.is_none() {
             let phase = if client.mode == ClientMode::Headless
@@ -925,6 +1091,9 @@ impl Managed {
                     }
                 }
                 if let Some((hwnd, _, _)) = original.window {
+                    if let Err(error) = self.persist() {
+                        return error;
+                    }
                     let matches = match phase {
                         WindowPhase::MinimizeThenHide => {
                             window_matches(hwnd, SW_HIDE) && unsafe { IsIconic(hwnd) } != 0
@@ -939,7 +1108,9 @@ impl Managed {
                 }
             }
         }
-        self.policy_result(process)
+        let (result, verified) = self.policy_result(process);
+        self.applied_resource = verified.then_some(effective);
+        result
     }
     fn restore_with(&mut self, process: &platform::ControlProcess) -> Result<(), String> {
         if !self.restoring {
@@ -948,8 +1119,17 @@ impl Managed {
             self.restoring = true;
         }
         let Some(original) = &self.original else {
+            self.restoring = false;
             return Ok(());
         };
+        if let Some((hwnd, _, _)) = original.window
+            && !window_owned(hwnd, self.identity.pid)
+        {
+            let replacement = player_window(self.identity.pid)?;
+            self.original.as_mut().unwrap().window.as_mut().unwrap().0 = replacement;
+            self.persist()?;
+        }
+        let original = self.original.as_ref().unwrap();
         let mut errors = Vec::new();
         unsafe {
             if let Some(value) = original.priority
@@ -1010,6 +1190,9 @@ impl Managed {
                     .unwrap_or_default()
             ));
         }
+        if let Some(journal) = &self.journal {
+            journal.remove()?;
+        }
         self.original = None;
         self.restoring = false;
         self.cancel_window_transition();
@@ -1018,6 +1201,17 @@ impl Managed {
         Ok(())
     }
     pub(crate) fn observed_mode(&self, result: &mut RuntimeControls) {
+        result.applied_resource_mode = self.applied_resource;
+        result.restoration_state = if self.journal_error.is_some() {
+            "unavailable"
+        } else if self.restoring {
+            "pending"
+        } else if self.original.is_some() {
+            "baseline_captured"
+        } else {
+            "no_pending_changes"
+        }
+        .into();
         let hwnd = self
             .original
             .as_ref()
@@ -1037,6 +1231,8 @@ impl Managed {
             })
             .into();
         if self.applied.is_some()
+            && !self.restoring
+            && self.journal_error.is_none()
             && self.activity.is_none()
             && self.pending_window.is_none()
             && self.window_error.is_none()
@@ -1069,10 +1265,12 @@ impl Managed {
         self.cancel_activity(false);
         self.release_pending()?;
         if self.original.is_some() {
-            let process = match platform::verify_controls(&self.identity, self.identity.generation)
-            {
+            let process = match self.verified_process() {
                 Ok(process) => process,
                 Err(_) if matches!(platform::alive(&self.identity), Ok(false)) => {
+                    if let Some(journal) = &self.journal {
+                        journal.remove()?;
+                    }
                     self.original = None;
                     self.cancel_window_transition();
                     self.window_error = None;
@@ -1277,6 +1475,28 @@ mod acceptance;
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn missing_legacy_baseline_blocks_controls_without_guessing() {
+        let identity = platform::control_fixture_identity(uuid::Uuid::new_v4());
+        let process = platform::verify_controls(&identity, identity.generation).unwrap();
+        let directory = std::env::temp_dir().join(format!(
+            "rolauncher-legacy-baseline-{}",
+            uuid::Uuid::new_v4()
+        ));
+        let mut managed = Managed::new(identity);
+        managed.attach_journal_once(&directory, "1", true).unwrap();
+        let result = managed.apply(
+            &process,
+            &ResourceSettings::default(),
+            &ClientSettings::default(),
+        );
+        assert!(result.contains("baseline unavailable"));
+        let mut observed = RuntimeControls::default();
+        managed.observed_mode(&mut observed);
+        assert!(observed.client_mode.is_none());
+        assert_eq!(observed.restoration_state, "unavailable");
+        assert!(!directory.exists());
+    }
 
     #[test]
     fn cancelled_input_and_pid_reuse_are_rejected_before_window_control() {
@@ -1387,6 +1607,36 @@ mod tests {
             }
         }
         let _restore_on_failure = Policies(&process, priority, original_power, original_memory);
+        let blocked_directory = std::env::temp_dir().join(format!(
+            "rolauncher-journal-denied-{}",
+            uuid::Uuid::new_v4()
+        ));
+        std::fs::create_dir(&blocked_directory).unwrap();
+        let mut blocked = Managed::new(identity.clone());
+        blocked
+            .attach_journal_once(&blocked_directory, "1", false)
+            .unwrap();
+        std::fs::write(
+            blocked_directory.join("control-journal"),
+            b"fixture blocker",
+        )
+        .unwrap();
+        let result = blocked.apply(
+            &process,
+            &ResourceSettings {
+                mode: ResourceMode::LowResource,
+                affinity: None,
+            },
+            &ClientSettings::default(),
+        );
+        assert!(result.contains("journal"), "{result}");
+        assert_eq!(unsafe { GetPriorityClass(process.raw()) }, priority);
+        assert!(same_power(
+            &power_policy(&process).unwrap(),
+            &original_power
+        ));
+        assert!(window_matches(hwnd, SW_SHOWNORMAL));
+        std::fs::remove_dir_all(blocked_directory).unwrap();
         let mut managed = Managed::new(identity);
         let result = managed.apply(
             &process,
@@ -1600,8 +1850,46 @@ mod tests {
             "Denied restoration must retain the originals"
         );
         assert!(denied.original.is_some());
+        let result = denied.apply(
+            &query_only,
+            &ResourceSettings::default(),
+            &ClientSettings::default(),
+        );
+        assert!(result.contains("Restoring"), "{result}");
+        let mut observed = RuntimeControls::default();
+        denied.observed_mode(&mut observed);
+        assert!(
+            observed.client_mode.is_none(),
+            "Incomplete restoration cannot report Normal"
+        );
         denied.restore().unwrap();
         environment.pump();
+
+        // Switch directly to Normal after a window is destroyed, before another Headless tick.
+        managed.apply(&process, &ResourceSettings::default(), &headless);
+        environment.pump();
+        unsafe {
+            DestroyWindow(hwnd);
+        }
+        fixture_window.0 = null_mut();
+        assert!(!managed.original_window_matches());
+        let hwnd = create_window();
+        fixture_window.0 = hwnd;
+        assert!(!hwnd.is_null());
+        let until = Instant::now() + std::time::Duration::from_secs(2);
+        loop {
+            let result = managed.apply(
+                &process,
+                &ResourceSettings::default(),
+                &ClientSettings::default(),
+            );
+            environment.pump();
+            if result.starts_with("Normal;") {
+                break;
+            }
+            assert!(Instant::now() < until, "{result}");
+        }
+        assert!(window_matches(hwnd, SW_SHOWNORMAL));
 
         managed.apply(&process, &ResourceSettings::default(), &headless);
         environment.pump();
@@ -1630,6 +1918,47 @@ mod tests {
             &original_power
         ));
         assert_eq!(memory_priority(&process).unwrap(), original_memory);
+
+        let directory = std::env::temp_dir().join(format!(
+            "rolauncher-interrupted-control-{}",
+            uuid::Uuid::new_v4()
+        ));
+        let mut interrupted = Managed::new(managed.identity.clone());
+        interrupted
+            .attach_journal_once(&directory, "1", false)
+            .unwrap();
+        interrupted.apply(&process, &ResourceSettings::default(), &headless);
+        environment.pump();
+        assert!(directory.join("control-journal").is_dir());
+        drop(interrupted);
+        let mut recovered = Managed::new(managed.identity.clone());
+        recovered
+            .attach_journal_once(&directory, "1", false)
+            .unwrap();
+        assert!(
+            recovered.original.is_some(),
+            "Restart must recover original settings"
+        );
+        let until = Instant::now() + std::time::Duration::from_secs(2);
+        loop {
+            environment.pump();
+            if recovered.restore().is_ok() {
+                break;
+            }
+            assert!(Instant::now() < until, "Journal restoration timed out");
+        }
+        assert_eq!(unsafe { GetPriorityClass(process.raw()) }, priority);
+        assert!(same_power(
+            &power_policy(&process).unwrap(),
+            &original_power
+        ));
+        assert_eq!(
+            std::fs::read_dir(directory.join("control-journal"))
+                .unwrap()
+                .count(),
+            0
+        );
+        std::fs::remove_dir_all(directory).unwrap();
 
         unsafe {
             environment_proc(hwnd, WM_WTSSESSION_CHANGE, WTS_SESSION_LOCK as usize, 0);

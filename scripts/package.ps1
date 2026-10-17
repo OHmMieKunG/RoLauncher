@@ -9,7 +9,7 @@ try {
         if ($LASTEXITCODE -ne 0) { throw 'Development version stamping failed' }
     }
     $taskManifest = Get-Content -LiteralPath 'Cargo.toml' -Raw
-    $taskVersion = [regex]::Match($taskManifest, '(?m)^version = "(\d+\.\d+\.\d+(?:-dev\.[0-9a-f]{12})?)"').Groups[1].Value
+    $taskVersion = [regex]::Match($taskManifest, '(?m)^version = "(\d+\.\d+\.\d+(?:-dev\.[0-9a-f]{12}|-beta\.[1-9][0-9]*)?)"').Groups[1].Value
     if (-not $taskVersion) { throw 'Cannot determine release version' }
     $taskName = "rolauncher-v$taskVersion"
     $taskOutput = if ([IO.Path]::IsPathRooted($OutputRootDirectory)) { [IO.Path]::GetFullPath($OutputRootDirectory) } else { [IO.Path]::GetFullPath((Join-Path $taskRoot $OutputRootDirectory)) }

@@ -42,7 +42,7 @@ class LiveFixture(reference.GitHubFixture):
             return copy.deepcopy(self.tag_rules if path.endswith('/1') else self.branch_ruleset)
         if path == '':
             return dict(id=evidence.REPO_ID, full_name=evidence.REPO, default_branch='main',
-                        owner=dict(id=evidence.OWNER, login='oangsa', type='User'))
+                        owner=dict(id=evidence.OWNER, login='OHmMieKunG', type='User'))
         return super().__call__(path)
 
     def __call__(self, path, method='GET', body=None, **kwargs):
@@ -418,7 +418,7 @@ class OwnerEvidenceTests(unittest.TestCase):
                             if body is not None:
                                 posts.append(path)
                                 raise AssertionError('Public POST must not occur')
-                            if path == 'user': return dict(id=evidence.OWNER, login='oangsa')
+                            if path == 'user': return dict(id=evidence.OWNER, login='OHmMieKunG')
                             if path == '/issues/1': return dict(number=1, state='open')
                             if path == '/actions/runs/99':
                                 return dict(path=evidence.WORKFLOW, event='workflow_run', head_branch='main',

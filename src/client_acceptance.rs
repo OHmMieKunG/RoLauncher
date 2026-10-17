@@ -14,12 +14,15 @@ enum Scenario {
     Benchmark,
     Idle25,
     Idle60,
+    IdleRecovery25,
+    IdleRecovery60,
     Activity25,
     Activity60,
     Recovery,
     ServerDisconnect,
     Isolation,
     Occlusion,
+    LauncherRestart,
 }
 
 #[derive(Deserialize)]
@@ -32,6 +35,8 @@ struct Config {
     output: PathBuf,
     presentmon: Option<PathBuf>,
     authorized_test_experience: bool,
+    #[serde(default)]
+    peer_place_id: Option<u64>,
 }
 impl Config {
     fn validate(&self) -> Result<()> {
@@ -49,6 +54,12 @@ impl Config {
         }
         if !self.authorized_test_experience || self.place_id == 0 {
             return Err("An explicitly authorized place is required");
+        }
+        if self
+            .peer_place_id
+            .is_some_and(|id| id == 0 || self.scenario != Scenario::Isolation)
+        {
+            return Err("A separate authorized peer place is supported only by isolation");
         }
         if self.account_ids[0] == self.account_ids[1]
             || self
@@ -197,6 +208,15 @@ fn public_account(a: &Account, runtime: Option<&Value>) -> Value {
         "creation_time": a.process.as_ref().map(|p| &p.creation_time),
         "generation": a.generation, "connected_since": a.connected_since,
         "last_disconnect": a.last_disconnect, "reconnection_attempts": a.reconnection_attempts,
+        "successful_recoveries": a.successful_recoveries,
+        "last_disconnect_reason": a.last_disconnect_reason, "last_disconnect_code": a.last_disconnect_code,
+        "effective_resource_mode": a.resource.effective_mode(a.client.mode),
+        "applied_resource_mode": runtime.and_then(|r|r.get("applied_resource_mode")),
+        "restoration_state": runtime.and_then(|r|r.get("restoration_state")),
+        "sampled_at": runtime.and_then(|r|r.get("sampled_at")),
+        "gpu_sampled_at": runtime.and_then(|r|r.get("gpu_sampled_at")),
+        "dedicated_gpu_memory_bytes": runtime.and_then(|r|r.get("dedicated_gpu_memory_bytes")),
+        "missing_telemetry": runtime.and_then(|r|r.get("unavailable")),
         "observed_mode": runtime.and_then(|r| r.get("client_mode")),
         "observed_window": runtime.and_then(|r| r.get("window_state")),
         "last_activity_attempt_at": runtime.and_then(|r| r.get("last_activity_attempt_at")),
@@ -205,7 +225,8 @@ fn public_account(a: &Account, runtime: Option<&Value>) -> Value {
 
 fn native_sample(managed: &mut Managed, account: &Account, hwnd: HWND) -> Result<Value> {
     let identity = account.process.as_ref().ok_or("No managed process")?;
-    let process = platform::verify_controls(identity, account.generation)
+    let process = managed
+        .verified_process()
         .map_err(|_| "Full process ownership verification failed")?;
     if !hwnd.is_null() && !window_owned(hwnd, identity.pid) {
         return Err("Owned window was destroyed or replaced; repeat this measurement block");
@@ -722,6 +743,12 @@ impl Run {
                 SW_SHOWNORMAL,
             ),
             (
+                "test_only_hidden_balanced",
+                ClientMode::Normal,
+                ResourceMode::Balanced,
+                SW_HIDE,
+            ),
+            (
                 "low_resource",
                 ClientMode::Normal,
                 ResourceMode::LowResource,
@@ -764,7 +791,16 @@ impl Run {
                         conditions[(step + block * 2) % conditions.len()];
                     self.transition(i, ClientMode::Normal, ResourceMode::Normal, SW_SHOWNORMAL)
                         .await?;
-                    if name == "minimized" || name == "hidden" {
+                    if name == "test_only_hidden_balanced" {
+                        self.transition(
+                            i,
+                            ClientMode::Normal,
+                            ResourceMode::Balanced,
+                            SW_SHOWNORMAL,
+                        )
+                        .await?;
+                    }
+                    if matches!(name, "minimized" | "hidden" | "test_only_hidden_balanced") {
                         let identity =
                             self.expected[i].process.as_ref().ok_or("Process missing")?;
                         let _handle =
@@ -868,7 +904,7 @@ impl Run {
         )
         .await
     }
-    async fn observe(&mut self, recovery: bool) -> Result<()> {
+    async fn observe(&mut self, seconds: u64, recovery: bool) -> Result<()> {
         for i in 0..2 {
             self.transition(
                 i,
@@ -885,8 +921,12 @@ impl Run {
             self.api.patch(&self.expected[i]).await?;
         }
         self.sample_for(
-            if recovery { 3600 } else { 1500 },
-            if recovery { "idle60" } else { "idle25" },
+            seconds,
+            if recovery {
+                "idle_recovery"
+            } else {
+                "idle_baseline"
+            },
             false,
         )
         .await
@@ -1001,6 +1041,30 @@ impl Run {
             }
         }
         Ok(())
+    }
+    async fn launcher_restart(&mut self) -> Result<()> {
+        for i in 0..2 {
+            self.transition(i, ClientMode::Headless, ResourceMode::Normal, SW_HIDE)
+                .await?;
+        }
+        self.journal.event(json!({"event":"checkpoint", "case":"launcher_restart", "action":"interrupt only the isolated launcher, reopen the same data directory and API port, then create continue-launcher-restart"}))?;
+        println!(
+            "Interrupt only the isolated test launcher and reopen it with the same data directory and port. Then create continue-launcher-restart in the evidence directory."
+        );
+        let checkpoint = self.config.output.join("continue-launcher-restart");
+        let until = Instant::now() + Duration::from_secs(300);
+        while !checkpoint.is_file() {
+            if Instant::now() >= until {
+                return Err("Launcher restart checkpoint timed out");
+            }
+            tokio::time::sleep(Duration::from_millis(100)).await;
+        }
+        self.steady().await?;
+        for i in 0..2 {
+            self.transition(i, ClientMode::Normal, ResourceMode::Normal, SW_SHOWNORMAL)
+                .await?;
+        }
+        self.sample("launcher_restart_restored", true).await
     }
     async fn occlusion(&mut self) -> Result<()> {
         let account = self.expected[0].clone();
@@ -1256,7 +1320,7 @@ async fn execute() -> Result<()> {
         .into_iter()
         .cloned()
         .collect();
-    for a in &original {
+    for (index, a) in original.iter().enumerate() {
         if a.desired_running
             || a.process.is_some()
             || a.tracker.is_some()
@@ -1264,8 +1328,13 @@ async fn execute() -> Result<()> {
         {
             return Err("Both dedicated accounts must be fully stopped before testing");
         }
-        if a.target.as_ref().map(|t| t.place_id) != Some(config.place_id) {
-            return Err("Both saved targets must match the explicitly authorized place");
+        let authorized = if index == 1 {
+            config.peer_place_id.unwrap_or(config.place_id)
+        } else {
+            config.place_id
+        };
+        if a.target.as_ref().map(|t| t.place_id) != Some(authorized) {
+            return Err("Saved targets must match their explicitly authorized places");
         }
         if !matches!(
             a.client.bootstrapper,
@@ -1308,14 +1377,17 @@ async fn execute() -> Result<()> {
         match run.config.scenario {
             Scenario::Switches => run.switches().await,
             Scenario::Benchmark => run.benchmark().await,
-            Scenario::Idle25 => run.observe(false).await,
-            Scenario::Idle60 => run.observe(true).await,
+            Scenario::Idle25 => run.observe(1500, false).await,
+            Scenario::Idle60 => run.observe(3600, false).await,
+            Scenario::IdleRecovery25 => run.observe(1500, true).await,
+            Scenario::IdleRecovery60 => run.observe(3600, true).await,
             Scenario::Activity25 => run.activity_observation(1500).await,
             Scenario::Activity60 => run.activity_observation(3600).await,
             Scenario::Recovery => run.recovery(true).await,
             Scenario::ServerDisconnect => run.recovery(false).await,
             Scenario::Isolation => run.isolation().await,
             Scenario::Occlusion => run.occlusion().await,
+            Scenario::LauncherRestart => run.launcher_restart().await,
         }
     };
     let result = tokio::select! { result = work => result, _ = tokio::signal::ctrl_c() => Err("Run interrupted; cleanup requested") };
@@ -1431,6 +1503,7 @@ async fn cleanup_stops_only_selected_accounts_before_restoring_preferences() {
             output: path.clone(),
             presentmon: None,
             authorized_test_experience: true,
+            peer_place_id: None,
         },
         original: accounts,
         expected: Vec::new(),

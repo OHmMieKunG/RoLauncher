@@ -16,12 +16,12 @@ import threading
 import time
 import zipfile
 
-REPO = 'oangsa/RoLauncher'
-REPO_ID = 1406138209
-OWNER = 71574088
+REPO = 'OHmMieKunG/RoLauncher'
+REPO_ID = 1422574717
+OWNER = 180964824
 WORKFLOW = '.github/workflows/release-promotion.yml'
 NAMESPACE = 'rolauncher-production-controls-v1'
-PRINCIPAL = 'github-user-71574088'
+PRINCIPAL = 'github-user-180964824'
 ROOT = Path(__file__).resolve().parent.parent
 POLICY = ROOT / '.github/owner-evidence-policy.json'
 STATE = Path('owner-evidence')
@@ -309,7 +309,7 @@ class StagedEvidence:
         p, _ = load_policy(self.policy_path)
         repository = call('')
         require(repository['id'] == REPO_ID and repository['full_name'] == REPO
-                and repository['owner']['id'] == OWNER and repository['owner']['login'] == 'oangsa'
+                and repository['owner']['id'] == OWNER and repository['owner']['login'] == 'OHmMieKunG'
                 and repository['default_branch'] == 'main', 'Live repository identity changed')
         identity = dict(schema=1, purpose=NAMESPACE, repository=REPO, repository_id=REPO_ID, owner_id=OWNER,
                         workflow=WORKFLOW, trusted_sha=os.environ['GITHUB_SHA'], run_id=int(os.environ['GITHUB_RUN_ID']),
@@ -473,7 +473,7 @@ def attend(args):
     require(args.approve_public_evidence, 'Separate public disclosure approval required')
     p, _ = load_policy()
     identity = gh_api('user')
-    require(identity['id'] == OWNER and identity['login'] == 'oangsa', 'Owner CLI identity required')
+    require(identity['id'] == OWNER and identity['login'] == 'OHmMieKunG', 'Owner CLI identity required')
     require(Path(args.key).is_file(), 'Dedicated local production key required')
     inbox = gh_api('/issues/' + str(p['inbox']))
     require(inbox['number'] == p['inbox'] and 'pull_request' not in inbox and inbox['state'] == 'open', 'Approved inbox unavailable')

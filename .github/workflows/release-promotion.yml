@@ -19,7 +19,9 @@ jobs:
     if: >-
       false &&
       vars.RELEASE_PROMOTION_ENABLED == 'true' &&
-      github.repository == 'oangsa/RoLauncher' &&
+      github.repository == 'OHmMieKunG/RoLauncher' &&
+      github.repository_id == '1422574717' &&
+      github.repository_owner_id == '180964824' &&
       github.event.workflow_run.event == 'push' &&
       github.event.workflow_run.conclusion == 'success' &&
       github.event.workflow_run.head_repository.full_name == github.repository &&

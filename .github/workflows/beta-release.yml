@@ -2,7 +2,7 @@ name: Beta release
 
 on:
   push:
-    tags: ['beta-v*']
+    tags: ['v*-beta.*', 'beta-v*']
 
 permissions:
   contents: read

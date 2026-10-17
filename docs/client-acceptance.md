@@ -35,13 +35,15 @@ Expected SHA256: `b2a706bc6ad475749e3b7e3409263aa1e6906d45bdcf993f6dbc0f660188f1
 | Scenario | Behavior |
 | --- | --- |
 | `switches` | Ten hide/restore round trips per account; peer identity/settings/window remain unchanged. |
-| `benchmark` | Six baseline conditions plus EcoQoS-off and timer-policy experiments, three rotated blocks per account; 30-second settling and 60-second measurements. |
+| `benchmark` | Six baseline conditions, test-only hidden Balanced, EcoQoS-off and timer-policy experiments, three rotated blocks per account; 30-second settling and 60-second measurements. |
 | `occlusion` | Visible-before, opaque external cover, visible-after; exploratory presentation/GPU comparison. |
+| `launcher_restart` | Hide both clients, interrupt only the isolated launcher, reopen its data directory/port, acknowledge the checkpoint, then verify Normal restoration. |
 | `isolation` | Different modes/profiles; Restart, Stop and Start the first account while checking its peer. |
 | `recovery` | Terminate only the verified first managed process; verify replacement, selected provider and Headless reapplication. |
 | `server_disconnect` | Wait for the owner to disconnect the first account using ordinary server controls; verify recovery. |
 | `idle25` | Both clients hidden; Balanced/Low Resource respectively; recovery off for 1,500 seconds. |
-| `idle60` | Same profiles; recovery on for 3,600 seconds; connections remain separate. |
+| `idle60` | Same profiles; recovery off for 3,600 seconds; baseline observation only. |
+| `idle_recovery25` / `idle_recovery60` | Separate 1,500/3,600-second observations with recovery on; replacement connections remain separate. |
 
 Each benchmark block waits for a displayed checkpoint filename.
 Arrange both windows visibly, interact normally in **both** accounts, then create that empty checkpoint file.
@@ -94,3 +96,17 @@ Activity runs require an unlocked desktop left idle, the updated Studio observer
 The client observer only counts input/idle notifications; it never generates activity or resets the idle timer.
 Manual activity during an activity run invalidates attribution; Windows submission alone is insufficient.
 A complete report remains UNVERIFIED until independent gameplay/capture-quality review; no fixture can establish a Roblox pass.
+
+## Single-account checks and two-account batches
+
+Single-account manual checks cover provider launch, repeated mode changes, diagnostics, stop/start and restoration after reopening the launcher.
+Use one dedicated account and its authorized experience in a separate data directory; record these as single-account checks.
+They cannot satisfy peer isolation, equal-workload comparisons or the public-beta gate, which require the two-account harness.
+
+For different-game isolation, set `scenario` to `isolation` and optional `peer_place_id` to the second explicitly authorized place.
+Keep both saved targets matched to their configured places; this scenario is excluded from equal-workload benchmarks.
+Independent observer evidence is required from both experiences; a single-place report cannot certify both connections.
+
+The hidden Balanced comparison uses Normal mode with Balanced process policy and harness-only hiding.
+It does not alter production Headless, which continues to enforce Low Resource.
+Run baseline idle, experimental activity and recovery observations separately for 25 and 60 minutes.

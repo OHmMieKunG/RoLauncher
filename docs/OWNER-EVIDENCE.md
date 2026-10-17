@@ -23,7 +23,7 @@ Every channel now requires explicit signed bypass evidence and native immutabili
 
 `release-promotion.json` bytes and identity remain unchanged.
 Challenge binding additionally covers the complete intent, Windows CI run identity/attempt, and receipt SHA256.
-It also binds repository numeric ID `1406138209`, owner ID `71574088`, workflow path, trusted SHA, publisher run/attempt, policy digest, inbox, nonce and phase.
+It also binds repository numeric ID `1422574717`, owner ID `180964824`, workflow path, trusted SHA, publisher run/attempt, policy digest, inbox, nonce and phase.
 
 The three steps share only the trusted job's local files; no downloaded checkpoint executes candidate code.
 Each step recomputes candidate evidence, artifacts and receipt; a changed receipt cannot resume.

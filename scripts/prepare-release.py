@@ -10,13 +10,17 @@ from versioning import core, development, write_version
 root = Path(__file__).resolve().parent.parent
 parser = argparse.ArgumentParser(description=__doc__)
 parser.add_argument("kind", choices=["feature", "fix", "major"])
-parser.add_argument("--stable", action="store_true", help="Prepare an intentional GitHub release without a dev suffix")
+channel = parser.add_mutually_exclusive_group()
+channel.add_argument("--stable", action="store_true", help="Prepare an intentional GitHub release without a dev suffix")
+channel.add_argument("--beta", type=int, help="Prepare an intentional public beta with a positive sequence number")
 parser.add_argument("--base", help="Verified numeric baseline: latest delivered target for fixes, latest published stable for features")
 args = parser.parse_args()
+if args.beta is not None and args.beta < 1:
+    parser.error("Beta number must be positive")
 if args.base:
     latest = args.base
 else:
-    request = urllib.request.Request("https://api.github.com/repos/oangsa/RoLauncher/releases/latest", headers={"User-Agent": "RoLauncher-release-preparation"})
+    request = urllib.request.Request("https://api.github.com/repos/OHmMieKunG/RoLauncher/releases/latest", headers={"User-Agent": "RoLauncher-release-preparation"})
     with urllib.request.urlopen(request, timeout=30) as response:
         latest = json.load(response)["tag_name"].removeprefix("v")
 if core(latest) != latest:
@@ -24,7 +28,7 @@ if core(latest) != latest:
 major, minor, patch = map(int, latest.split("."))
 parts = {"feature": (major, minor + 1, 0), "fix": (major, minor, patch + 1), "major": (major + 1, 0, 0)}[args.kind]
 target = ".".join(map(str, parts))
-version = target if args.stable else development(target)
+version = target + f"-beta.{args.beta}" if args.beta is not None else target if args.stable else development(target)
 write_version(root, version)
 notes = root / f"docs/RELEASE-{target}.md"
 if not notes.exists():

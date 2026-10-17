@@ -50,7 +50,9 @@ Controls whose original values cannot be read are skipped; no guessed restoratio
 Restore actions select Normal/Default and clear auto-hide while preserving an explicitly selected affinity.
 
 Dead or retired identities are cleaned separately; graceful shutdown retries restoration and records any errors in `control-cleanup.json`.
-Forced launcher termination cannot execute cleanup, and original settings are not persisted across a crash; use Task Manager or restart the affected managed client if needed.
+Before changing captured settings, a versioned journal is flushed and atomically replaced outside the account database.
+On reopening, exact account/generation/PID/creation-time/tracker/session ownership is required before recovery.
+Missing or invalid baselines remain unavailable; no guessed defaults or automatic client restarts are used.
 Neither visibility nor scheduling changes disable rendering or reduce memory allocation by definition.
 
 ## Usage and build
@@ -96,3 +98,9 @@ Normal accounts retain 120 FPS/quality 10 when those are their saved settings; R
 Runtime memory sampling includes private allocation and page-fault rate; page faults include soft faults.
 Timer-resolution policy and EcoQoS-off comparisons exist only in the explicit test harness, with exact policy restoration and peer frame capture.
 No additional production throttling or external per-process 1 FPS/rendering-off control is claimed.
+
+## Stabilization candidate
+
+Recreated windows are enumerated before Normal restoration; incomplete process restoration cannot report Normal applied.
+Verified handles are reused while identity remains unchanged; one bounded GPU worker keeps WMI collection off the transition loop.
+GPU memory retains adapter attribution; multi-adapter counters are not summed into a device-wide value.

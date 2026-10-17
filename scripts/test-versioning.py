@@ -36,7 +36,13 @@ with tempfile.TemporaryDirectory() as temp:
     assert len(list((fixture / "docs").glob("RELEASE-*"))) == 1
     subprocess.run([sys.executable, str(fixture / "scripts/prepare-release.py"), "fix", "--base", "1.8.0"], check=True, capture_output=True)
     assert core(tomllib.loads((fixture / "Cargo.toml").read_text())["package"]["version"]) == "1.8.1"
-    for invalid in ("1.4.0-dev.bad", "1.4.0-dev.123456abcdef-extra", "1.4", "01.4.0"):
+    write_version(fixture, "1.8.4-beta.1")
+    assert core("1.8.4-beta.10") == "1.8.4"
+    assert tomllib.loads((fixture / "Cargo.toml").read_text())["package"]["version"] == "1.8.4-beta.1"
+    assert core(stamp(fixture)) == "1.8.4"
+    subprocess.run([sys.executable, str(fixture / "scripts/prepare-release.py"), "fix", "--base", "1.8.3", "--beta", "10"], check=True, capture_output=True)
+    assert tomllib.loads((fixture / "Cargo.toml").read_text())["package"]["version"] == "1.8.4-beta.10"
+    for invalid in ("1.4.0-dev.bad", "1.4.0-dev.123456abcdef-extra", "1.4", "01.4.0", "1.8.4-beta.0", "1.8.4-beta.01", "1.8.4-beta.x"):
         try:
             core(invalid)
         except ValueError:

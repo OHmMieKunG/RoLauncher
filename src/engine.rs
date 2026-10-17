@@ -561,7 +561,7 @@ impl Engine {
             }
             let a = account_mut(s,id)?; a.finish_run(Utc::now()); a.desired_running = action != "stop";
             if a.process.is_none() { a.tracker=None;a.ownership_deadline=None; }
-            a.generation = Uuid::new_v4(); a.failures = 0; a.next_retry = None; a.connected_since = None; a.disconnected_since = None; a.last_error = None;
+            a.generation = Uuid::new_v4(); a.failures = 0; a.next_retry = None; a.connected_since = None; a.disconnected_since = None; a.last_error = None; a.pending_recovery = false;
             a.status = if action == "stop" { Status::Stopped } else { Status::Queued };
             a.public_fallback_active = false; a.recovery_reason.clear(); a.operation_id = Some(op.id);
             s.operations.insert(op.id,op.clone()); Ok(op)
@@ -766,6 +766,7 @@ impl Engine {
             .update(&account.id, account.generation, |a| {
                 if a.failures > 0 {
                     a.reconnection_attempts = a.reconnection_attempts.saturating_add(1);
+                    a.pending_recovery = true;
                 }
                 a.status = Status::Launching;
             })
@@ -1015,6 +1016,8 @@ impl Engine {
                         let _ = self.update(&account.id, account.generation, |a| {
                             if a.connected_since.is_some() {
                                 a.last_disconnect = Some(Utc::now());
+                                a.last_disconnect_reason = Some("process_exit".into());
+                                a.last_disconnect_code = None;
                             }
                             a.process = None;
                             a.tracker = None;
@@ -1156,6 +1159,14 @@ impl Engine {
             Signal::Connected => {
                 let _ = self.update(id, generation, |a| {
                     if a.desired_running && a.status != Status::NeedsAttention {
+                        if a.pending_recovery
+                            && a.process
+                                .as_ref()
+                                .is_some_and(|p| p.generation == generation)
+                        {
+                            a.successful_recoveries = a.successful_recoveries.saturating_add(1);
+                            a.pending_recovery = false;
+                        }
                         a.status = Status::Running;
                         a.connected_since.get_or_insert_with(Utc::now);
                         a.disconnected_since = None;
@@ -1173,6 +1184,8 @@ impl Engine {
                     if a.desired_running && a.status != Status::NeedsAttention {
                         if a.disconnected_since.is_none() {
                             a.last_disconnect = Some(Utc::now());
+                            a.last_disconnect_reason = Some("disconnected".into());
+                            a.last_disconnect_code = None;
                             a.last_error = Some("Game connection lost; allowing 30 seconds to reconnect before recovery".into());
                         }
                         a.status = Status::Reconnecting;
@@ -1180,12 +1193,18 @@ impl Engine {
                         a.connected_since = None;
                         let kick_known = a.last_error.as_deref().is_some_and(|error| error.starts_with("Session lost (code 267)"));
                         if signal == Signal::ConnectionFailed && !kick_known {
+                            a.last_disconnect_reason = Some("connection_failed".into());
+                            a.last_disconnect_code = Some(279);
                             a.recovery_reason = "ConnectionFailed".into();
                             a.last_error = Some("Connection failed: server did not respond (279); allowing 30 seconds to reconnect before recovery".into());
                         } else if signal == Signal::JoinRequestFailed && !kick_known {
+                            a.last_disconnect_reason = Some("join_request_failed".into());
+                            a.last_disconnect_code = None;
                             a.recovery_reason = "JoinRequestFailed".into();
                             a.last_error = Some("Join request failed (HTTP/network error); allowing 30 seconds to retry before recovery".into());
                         } else if let Signal::SessionLost(code) = signal && !kick_known {
+                            a.last_disconnect_reason = Some("session_lost".into());
+                            a.last_disconnect_code = code;
                             a.recovery_reason = if code == Some(267) { "Kick267" } else { "SessionLost" }.into();
                             a.last_error = Some(match code {
                                 Some(code) => format!("Session lost (code {code}); allowing 30 seconds to reconnect before recovery"),
@@ -2196,12 +2215,26 @@ mod tests {
             generation,
             Failure::new(FailureKind::Auth, "RAW_SECRET_ERROR"),
         );
+        engine
+            .transaction(|s| {
+                s.database.activity.last_mut().unwrap().message =
+                    "SECRET_RAW_LOG https://auth.example/ticket C:\\Users\\SECRET_PATH".into();
+                let a = account_mut(s, "1")?;
+                a.last_disconnect_reason = Some("SECRET_REASON".into());
+                a.tracker = Some("SECRET_TRACKER".into());
+                Ok(())
+            })
+            .unwrap();
         let report = engine.diagnostics().to_string();
         for secret in [
             "SECRET_ALIAS",
             "PRIVATE-SECRET",
             "RAW_SECRET_ERROR",
             "encrypted_session",
+            "SECRET_RAW_LOG",
+            "SECRET_PATH",
+            "SECRET_REASON",
+            "SECRET_TRACKER",
             engine.token(),
         ] {
             assert!(!report.contains(secret));
@@ -2388,6 +2421,58 @@ mod tests {
             })
             .unwrap();
         (engine, path)
+    }
+    #[cfg(windows)]
+    #[test]
+    fn successful_recoveries_are_verified_durable_deduplicated_and_isolated() {
+        let (engine, path) = fixture(2);
+        engine.command("1", "start").unwrap();
+        let generation = engine.snapshot().accounts[0].generation;
+        engine
+            .update("1", generation, |a| {
+                a.pending_recovery = true;
+                a.reconnection_attempts = 1;
+            })
+            .unwrap();
+        engine.signal("1", generation, Signal::Connected);
+        assert_eq!(engine.snapshot().accounts[0].successful_recoveries, 0);
+        engine
+            .update("1", generation, |a| {
+                a.process = Some(ProcessIdentity {
+                    pid: 42,
+                    creation_time: "1".into(),
+                    tracker: "fixture".into(),
+                    generation,
+                })
+            })
+            .unwrap();
+        engine.signal("1", Uuid::new_v4(), Signal::Connected);
+        assert_eq!(engine.snapshot().accounts[0].successful_recoveries, 0);
+        engine.signal("1", generation, Signal::Connected);
+        engine.signal("1", generation, Signal::Connected);
+        engine.signal("1", generation, Signal::SessionLost(Some(267)));
+        engine.signal("1", generation, Signal::Connected);
+        let accounts = engine.snapshot().accounts;
+        assert_eq!(accounts[0].successful_recoveries, 1);
+        assert_eq!(accounts[1].successful_recoveries, 0);
+        assert_eq!(
+            accounts[0].last_disconnect_reason.as_deref(),
+            Some("session_lost")
+        );
+        assert_eq!(accounts[0].last_disconnect_code, Some(267));
+        let reopened = Engine::open(Store::new(path.clone()).unwrap(), "test".into()).unwrap();
+        reopened.signal("1", generation, Signal::Connected);
+        assert_eq!(reopened.snapshot().accounts[0].successful_recoveries, 1);
+        engine
+            .update("1", generation, |a| a.pending_recovery = true)
+            .unwrap();
+        engine.command("1", "restart").unwrap();
+        let current = engine.snapshot().accounts[0].generation;
+        engine.signal("1", current, Signal::Connected);
+        assert_eq!(engine.snapshot().accounts[0].successful_recoveries, 1);
+        drop(reopened);
+        drop(engine);
+        std::fs::remove_dir_all(path).unwrap();
     }
     #[test]
     fn game_profiles_survive_restarts_validate_and_leave_account_targets_independent() {

@@ -9,10 +9,11 @@
 AppId={{F2E0EED4-6CF4-4FBA-9B4A-52E2C52BC5B5}
 AppName=RoLauncher
 AppVersion={#Version}
-AppPublisher=oangsa
-AppPublisherURL=https://github.com/oangsa/RoLauncher
-AppSupportURL=https://github.com/oangsa/RoLauncher/issues
-AppUpdatesURL=https://github.com/oangsa/RoLauncher/releases
+VersionInfoVersion={#VersionMajor}.{#VersionMinor}.{#VersionPatch}.0
+AppPublisher=OHmMieKunG
+AppPublisherURL=https://github.com/OHmMieKunG/RoLauncher
+AppSupportURL=https://github.com/OHmMieKunG/RoLauncher/issues
+AppUpdatesURL=https://github.com/OHmMieKunG/RoLauncher/releases
 DefaultDirName={localappdata}\Programs\RoLauncher
 DefaultGroupName=RoLauncher
 PrivilegesRequired=lowest

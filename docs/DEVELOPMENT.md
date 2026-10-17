@@ -16,7 +16,7 @@ Output: `dist\rolauncher`; UI previews: `target\ui-preview`. Tests use isolated 
 
 ## Git flow
 
-Remote: `git@github.com:oangsa/RoLauncher.git`.
+Remote: `git@github.com:OHmMieKunG/RoLauncher.git`; retain `oangsa/RoLauncher` as upstream.
 
 1. Branch from `dev` as `feature/description`.
 2. Open a PR into `dev`; pass CI.

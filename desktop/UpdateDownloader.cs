@@ -27,20 +27,30 @@ public sealed class UpdateDownloader : IDisposable
 
     public static string ValidateRelease(UpdateView view, string installedVersion)
     {
-        var current = Regex.Match(installedVersion, @"^((0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*))(-dev\.[0-9a-f]{12})?$");
-        var development = current.Success && current.Groups[5].Success;
-        if (!Regex.IsMatch(view.Version ?? "", @"^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$") ||
-            !Version.TryParse(view.Version, out var target) || !current.Success || !Version.TryParse(current.Groups[1].Value, out var installed) ||
-            !view.Available || target < installed || (target == installed && !development))
+        var current = ParseVersion(installedVersion);
+        var target = ParseVersion(view.Version);
+        var legacyBeta = view.Prerelease && target.Channel == 2;
+        if (legacyBeta) target.Channel = 1;
+        if (!view.Available || target.Channel == 0 || target.CompareTo(current) <= 0 || target.Channel == 1 && !view.Prerelease)
             throw new InvalidDataException("The update must be a newer version.");
         var name = $"rolauncher-v{view.Version}-setup-x64.exe";
-        var tag = (view.Prerelease ? "beta-v" : "v") + view.Version;
+        var tag = (legacyBeta ? "beta-v" : "v") + view.Version;
         var prefix = $"{Publisher}/releases/download/{tag}/";
         var downloadUrl = view.InstallerUrl;
         if (downloadUrl != prefix + name || view.ChecksumsUrl != prefix + $"rolauncher-v{view.Version}-SHA256SUMS.txt" ||
             view.ReleaseUrl != $"{Publisher}/releases/tag/{tag}")
             throw new InvalidDataException("Automatic installation is supported only for configured fork releases.");
         return name;
+    }
+
+    private static (Version Core, int Channel, ulong Beta) ParseVersion(string value)
+    {
+        var match = Regex.Match(value ?? "", @"^((?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*))(?:-(dev\.[0-9a-f]{12}|beta\.([1-9][0-9]*)))?$");
+        if (!match.Success || !Version.TryParse(match.Groups[1].Value, out var core) ||
+            match.Groups[3].Success && !ulong.TryParse(match.Groups[3].Value, out _))
+            throw new InvalidDataException("The release version is invalid.");
+        return (core, !match.Groups[2].Success ? 2 : match.Groups[3].Success ? 1 : 0,
+            match.Groups[3].Success ? ulong.Parse(match.Groups[3].Value) : 0);
     }
 
     public static string ReadChecksum(string text, string filename)

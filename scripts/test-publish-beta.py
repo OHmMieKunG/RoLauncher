@@ -25,7 +25,7 @@ class GitHubFixture:
         if path.startswith("/releases/tags/"):
             return self.release
         if path == "/releases" and method == "POST":
-            self.release = dict(body, id=1, upload_url="https://uploads.github.com/repos/oangsa/RoLauncher/releases/1/assets{?name,label}", html_url="https://github.com/oangsa/RoLauncher/releases/tag/beta-v1.1.0")
+            self.release = dict(body, id=1, upload_url="https://uploads.github.com/repos/OHmMieKunG/RoLauncher/releases/1/assets{?name,label}", html_url="https://github.com/OHmMieKunG/RoLauncher/releases/tag/beta-v1.1.0")
             return self.release
         if path == "/releases/1/assets":
             return list(self.assets.values())
@@ -40,6 +40,13 @@ class GitHubFixture:
 
 
 class BetaChecks(unittest.TestCase):
+    def test_numbered_beta_uses_full_identity_and_new_tag(self):
+        api = GitHubFixture()
+        beta.publish(api, {"test.zip": b"verified"}, "1.8.4-beta.1", SHA, "notes")
+        self.assertEqual(api.release["tag_name"], "v1.8.4-beta.1")
+        self.assertTrue(api.release["prerelease"])
+        self.assertEqual(api.calls[-1][2]["make_latest"], "false")
+
     def test_local_development_build_is_rejected_before_github_access(self):
         fixture = GitHubFixture()
         with self.assertRaises(ValueError):

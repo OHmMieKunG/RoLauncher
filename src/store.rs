@@ -173,6 +173,7 @@ impl Store {
             a.public_fallback_active = false;
             a.last_error = None;
             a.recovery_reason.clear();
+            a.pending_recovery = false;
         }
         db.retired_launches.clear();
         db.version = 2;

@@ -58,3 +58,13 @@ Neither experiment is a 1 FPS limiter or a renderer-off mechanism.
 Report each block's CPU, working/private memory, page faults, GPU engines, frame evidence and restore latency; include the Normal peer's frame capture.
 Do not promote a candidate based on missing frame events, lower working set alone, interrupted simulation or a replacement connection.
 All additional Roblox measurements remain BLOCKED pending dedicated accounts and an authorized experience.
+
+## Stabilization candidate measurements
+
+The harness adds `test_only_hidden_balanced` beside Normal, pure Minimized, pure Hidden and optimized Headless.
+All retain three rotated blocks, 30-second settling and 60-second measurement windows; reports preserve mean, peak, median and p95.
+Reports retain both presentation captures, exact process policies, restore latency and missing telemetry; compare equal workloads only.
+
+Dedicated GPU-memory counters retain adapter attribution; missing counters stay null and multi-adapter values are not summed.
+Launcher restart/restoration and different-game isolation are separate acceptance scenarios, not performance comparisons.
+No new Roblox measurements were executed for this candidate.

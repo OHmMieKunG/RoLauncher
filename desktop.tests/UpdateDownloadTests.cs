@@ -31,8 +31,22 @@ internal static class UpdateDownloadTests
             InstallerUrl = view.InstallerUrl.Replace("/v1.0.1/", "/beta-v1.0.1/")
         };
         check(UpdateDownloader.ValidateRelease(beta, "1.0.0") == name, "Official beta packages retain numeric versions and exact beta tag URLs.");
+        Rejected(() => UpdateDownloader.ValidateRelease(beta, "1.0.1-beta.1"), "Historical beta tags cannot replace a matching numbered beta.");
         Rejected(() => UpdateDownloader.ValidateRelease(beta with { Prerelease = false }, "1.0.0"), "Beta links cannot masquerade as a stable release.");
         Rejected(() => UpdateDownloader.ValidateRelease(view with { Prerelease = true }, "1.0.0"), "Beta metadata cannot authorize mismatched stable links.");
+        var numbered = view with {
+            Version = "1.0.1-beta.10", Prerelease = true,
+            ReleaseUrl = view.ReleaseUrl.Replace("v1.0.1", "v1.0.1-beta.10"),
+            DownloadUrl = view.DownloadUrl.Replace("v1.0.1", "v1.0.1-beta.10"),
+            ChecksumsUrl = view.ChecksumsUrl.Replace("v1.0.1", "v1.0.1-beta.10"),
+            InstallerUrl = view.InstallerUrl.Replace("v1.0.1", "v1.0.1-beta.10")
+        };
+        check(UpdateDownloader.ValidateRelease(numbered, "1.0.1-beta.2").Contains("beta.10"), "Beta numbers sort numerically.");
+        check(UpdateDownloader.ValidateRelease(numbered, "1.0.1-dev.123456abcdef").Contains("beta.10"), "Public beta replaces matching development builds.");
+        check(UpdateDownloader.ValidateRelease(view, "1.0.1-beta.10") == name, "Stable supersedes its matching beta.");
+        Rejected(() => UpdateDownloader.ValidateRelease(numbered, "1.0.1"), "Beta cannot replace matching stable.");
+        Rejected(() => UpdateDownloader.ValidateRelease(numbered, "1.0.1-beta.11"), "Beta downgrades are rejected.");
+        Rejected(() => UpdateDownloader.ValidateRelease(numbered with { Prerelease = false }, "1.0.0"), "Numbered beta cannot claim stable status.");
         check(!UpdateDownloader.AllowedRedirect(new("https://github.com.evil.example/a")) && !UpdateDownloader.AllowedRedirect(new("http://release-assets.githubusercontent.com/a")), "Redirects cannot escape GitHub or downgrade HTTPS.");
         var payload = "MZisolated-installer-fixture"u8.ToArray();
         var hash = Convert.ToHexString(SHA256.HashData(payload)).ToLowerInvariant();

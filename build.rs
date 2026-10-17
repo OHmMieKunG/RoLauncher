@@ -11,7 +11,7 @@ fn main() {
             .set("ProductName", "RoLauncher")
             .set("FileDescription", "RoLauncher account launcher")
             .set("OriginalFilename", "RoLauncher.exe")
-            .set("CompanyName", "oangsa")
+            .set("CompanyName", "OHmMieKunG")
             .compile()
             .expect("Unable to embed the Windows app icon/version resources");
     }

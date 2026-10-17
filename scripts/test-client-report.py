@@ -27,6 +27,10 @@ class EvidenceTests(unittest.TestCase):
         export = {"schema": 1, "run_id": "activity", "place_id": 1, "records": [record]}
         self.assertEqual(report.continuity(events, export)["status"], "EVIDENCE_COMPLETE")
         self.assertEqual(report.continuity(events[:-2], export)["status"], "UNVERIFIED")
+        for scenario in ("Idle25", "Idle60", "IdleRecovery25", "IdleRecovery60"):
+            events[0]["scenario"] = scenario
+            self.assertEqual(report.continuity(events[:4], export)["status"], "UNVERIFIED")
+        events[0]["scenario"] = "Activity25"
         for event in events[1:]: event["accounts"][0]["last_input_submitted_at"] = "2026-10-16T00:00:00Z"
         self.assertEqual(report.continuity(events, export)["status"], "UNVERIFIED")
         for event in events[1:]: event["accounts"][0]["last_input_submitted_at"] = None
@@ -37,6 +41,18 @@ class EvidenceTests(unittest.TestCase):
         self.assertIsNone(report.distribution([None, float("nan"), float("inf"), True]))
         self.assertEqual(report.distribution([3, 1, 2])["median"], 2)
         self.assertEqual(report.distribution(list(range(100)))["p95"], 94)
+        self.assertEqual(report.distribution([3, 1, 2])["peak"], 3)
+
+    def test_balanced_experiment_preserves_policy_and_missing_telemetry(self):
+        events = [{"event":"begin"}, {"event":"sample", "phase":"a0-b0-test_only_hidden_balanced", "accounts":[
+            {"account_id":"1", "pid":10, "dedicated_gpu_memory_bytes":None, "native":{"priority":16384,"power_control_mask":0,"memory_priority":5}}
+        ]}]
+        with tempfile.TemporaryDirectory() as directory:
+            phase = report.summarize(events,Path(directory))["phases"][0]
+        self.assertTrue(phase["test_only"])
+        self.assertEqual(phase["effective_policies"][0]["power_control_mask"],0)
+        self.assertEqual(phase["missing_telemetry"]["gpu_sampled_at"],1)
+        self.assertIsNone(phase["dedicated_gpu_memory_bytes"])
 
     def test_blocked_is_not_a_measurement(self):
         result = report.blocked({"active_processes": []})

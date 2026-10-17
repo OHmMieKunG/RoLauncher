@@ -1,6 +1,6 @@
 {
   "schema": 1,
-  "generated_utc": "2026-10-17T15:32:17.833512+00:00",
+  "generated_utc": "2026-10-17T19:43:56.625691+00:00",
   "status": "BLOCKED",
   "cases": {
     "official_normal_headless": "BLOCKED",
@@ -98,7 +98,7 @@
     "live_tests": "BLOCKED"
   },
   "scope": "Preflight inventory is not a Roblox benchmark",
-  "development_build": "1.8.3-dev.3a1e4940f9af",
+  "development_build": "1.8.4-dev.a7c40bd57487",
   "normal_graphics_policy": {
     "fps_cap": 120,
     "saved_quality": 10,
@@ -117,38 +117,109 @@
     "scope": "explicit_test_harness_only",
     "cases": [
       "headless_ecoqos_off",
-      "headless_ignore_timer"
+      "headless_ignore_timer",
+      "test_only_hidden_balanced"
     ],
     "roblox_measurements": null
   },
   "rendering_off": "UNSUPPORTED",
   "per_process_1_fps": "UNSUPPORTED",
   "live_tests_executed": false,
-  "code_tree_sha256": "69311b58fab251c02f42f1ee82cbe8c018ec44793c65c1bbf8a5d22713aa5b6d",
+  "code_tree_sha256": "8b22021241729c4ac1ad7bee4f9d1e248e5366cc24b8232bb04b87bc0013f82d",
   "code_files_count": 102,
   "regression_evidence": {
-    "rust_regular_passed": 98,
+    "rust_regular_passed": 103,
     "rust_ignored_by_default": 6,
-    "desktop_assertions_passed": 107,
+    "desktop_assertions_passed": 119,
     "native_fixture_tests_passed": 3,
-    "python_report_fixtures_passed": 6,
-    "native_ui_smoke": "PASSED_AFTER_BOUNDED_COMPOSITOR_WAIT",
+    "python_report_fixtures_passed": 7,
+    "python_archive_fixtures_passed": 3,
+    "python_beta_publication_fixtures_passed": 8,
+    "fork_promotion_fixtures_passed": 32,
+    "hotfix_fixtures_passed": 14,
+    "fork_owner_evidence_fixtures_passed": 25,
+    "beta_rust_and_csharp_metadata": "PASSED: full beta identity; numeric 1.8.4.0",
+    "native_ui_smoke": "PASSED",
     "authenticated_ui_bridge": "PASSED",
     "installer_fixture": "PASSED",
     "clippy": "PASSED",
-    "observer_scripts": "COMPILED_ONLY",
-    "upstream_promotion_fixtures_passed": 30,
-    "upstream_hotfix_fixtures_passed": 14,
-    "upstream_owner_evidence_fixtures_passed": 25,
-    "native_typography": "PASSED",
-    "python_beta_publication_fixtures_passed": 7,
-    "non_windows_build_guard": "PASSED",
-    "workflow_structure": "PASSED_WINDOWS_ONLY"
+    "formatting": "PASSED",
+    "offline_adapter": "PASSED: real dependencies",
+    "package_verification": "See target/stabilization-package-verification.log for exact archive/source and isolated production-shell checks",
+    "observer_scripts": "UNCHANGED; baseline compiled-only evidence retained; no live execution"
   },
   "upstream_main": "193c465",
-  "optimization_scope": "Launcher full-state sampling read moved from 100 ms ticks to two-second samples; no Roblox savings measured",
+  "optimization_scope": "Verified process handles reused; bounded shared GPU collector isolated from window transitions. No Roblox resource savings measured.",
   "supported_platforms": [
     "windows-x64"
   ],
-  "linux_support": "REMOVED"
+  "linux_support": "REMOVED",
+  "baseline_inventory_build": "1.8.3-dev.3a1e4940f9af",
+  "public_candidate": "1.8.4-beta.1",
+  "baseline_head": "486f61953b1a179521f4eb97cf2c7d739911aad7",
+  "release_gates": {
+    "local_candidate": "AUTOMATED_GATES_PASSED; packaging checked separately",
+    "public_beta": "NO-GO",
+    "stable": "NO-GO",
+    "reason": "Two authorized live accounts and an authorized experience unavailable"
+  },
+  "feature_status": {
+    "crash_restoration_journal": [
+      "IMPLEMENTED",
+      "TESTED"
+    ],
+    "recreated_window_and_incomplete_restoration": [
+      "IMPLEMENTED",
+      "TESTED"
+    ],
+    "verified_handle_reuse_and_bounded_gpu_worker": [
+      "IMPLEMENTED",
+      "TESTED"
+    ],
+    "dedicated_gpu_memory_by_adapter": [
+      "IMPLEMENTED",
+      "TESTED",
+      "BLOCKED: live supported counters"
+    ],
+    "successful_recovery_accounting": [
+      "IMPLEMENTED",
+      "TESTED"
+    ],
+    "allowlisted_diagnostics": [
+      "IMPLEMENTED",
+      "TESTED"
+    ],
+    "numbered_beta_versions_and_metadata": [
+      "IMPLEMENTED",
+      "TESTED"
+    ],
+    "fork_publishing_boundaries": [
+      "IMPLEMENTED",
+      "TESTED",
+      "BLOCKED: publication disabled"
+    ],
+    "hidden_balanced_harness": [
+      "IMPLEMENTED",
+      "EXPERIMENTAL",
+      "BLOCKED: live measurements"
+    ],
+    "launcher_restart_and_different_game_isolation": [
+      "IMPLEMENTED",
+      "BLOCKED: live acceptance"
+    ],
+    "idle_activity": [
+      "EXPERIMENTAL",
+      "BLOCKED: 25/60-minute observations"
+    ],
+    "network_only": [
+      "UNSUPPORTED"
+    ],
+    "per_process_1_fps": [
+      "UNSUPPORTED"
+    ],
+    "rendering_off": [
+      "UNSUPPORTED"
+    ]
+  },
+  "fingerprint_scope": "Sorted path NUL bytes NUL; src/scripts/desktop/desktop.tests/installer/.github source and config, plus root manifests/build files; excludes bin/obj/cache and docs."
 }

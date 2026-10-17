@@ -1,83 +1,56 @@
 # Client compatibility and performance report
 
-Development build: **1.8.3-dev.3a1e4940f9af**, 2026-10-17.
-Integrated upstream main: `193c465`; GitHub release publication remains disabled.
-Source/build/script fingerprint: `69311b58fab251c02f42f1ee82cbe8c018ec44793c65c1bbf8a5d22713aa5b6d` (102 files).
-
-## Read-only host inventory
-
-| Item | Observed value |
-| --- | --- |
-| Windows | Windows 11 Pro, 10.0.26300.9457, 64-bit |
-| CPU | AMD Ryzen 9 5900HS, 16 logical processors |
-| Integrated GPU | AMD Radeon Graphics, driver 31.0.21925.1001 |
-| Discrete GPU | NVIDIA GeForce RTX 3050 Ti Laptop GPU, driver 32.0.16.1742 |
-| Fishstrap | 3.1.2; both Roblox protocols point to Fishstrap.exe |
-| Roblox player found | Fishstrap distribution, file version 0.743.0.7431134 |
-| Official / Bloxstrap | Not found in inspected standard roots; launches not attempted |
-| Active processes at preflight | Three Roblox players and one launcher; ownership, game progress and mode unverified |
-| Presentation tooling | Pinned official PresentMon 2.6.0; no live capture performed |
-| Observer tooling | Three scripts compiled with official Luau 0.743; no Studio execution |
-
-The recorded preflight only inspected installations and process metadata.
-No live Roblox process was changed, launched, rejoined or terminated.
-Dedicated test accounts and an authorized experience remain unavailable.
+Local candidate: **1.8.4-dev.a7c40bd57487**; public target: **1.8.4-beta.1**, upcoming.
+Baseline: `486f619`; Windows 10/11 x64 only.
+Publication remains disabled; **public beta NO-GO / stable NO-GO** until authorized live evidence is complete.
 
 ## Feature status
 
-| Feature | Status and evidence |
-| --- | --- |
-| Per-account Normal/Headless controls | IMPLEMENTED; existing reversible policies and native fixtures TESTED |
-| Normal graphics preservation | IMPLEMENTED; shared graphics files and driver profiles are never edited |
-| Private allocation / page-fault telemetry | IMPLEMENTED / TESTED with native fixture; faults include soft faults |
-| Headless idle activity | IMPLEMENTED / EXPERIMENTAL; default off, separate opt-in; cancellation/restoration tested without keyboard submission |
-| Timer-resolution / EcoQoS-off comparisons | IMPLEMENTED in test harness only; native policy restoration TESTED; Roblox results BLOCKED |
-| Connection and recovery accounting | IMPLEMENTED / TESTED with fixtures; live continuous uptime BLOCKED |
-| Provider matrix and simultaneous clients | BLOCKED pending dedicated accounts, experience and providers |
-| Per-process 1 FPS / rendering-off / Network-only | UNSUPPORTED under the established permitted interfaces |
+| Feature | Classification | Evidence and limit |
+| --- | --- | --- |
+| Versioned restoration journal | IMPLEMENTED / TESTED | Atomic persistence, stale identity rejection, interrupted native supervision and write-failure fixtures. |
+| Recreated windows and Normal restoration | IMPLEMENTED / TESTED | Native window recreation, denied process restoration and rapid switching preserve baselines. |
+| Missing legacy baselines | IMPLEMENTED / TESTED | Existing clients stay unavailable; no guessed settings or automatic restart. |
+| Verified process handles | IMPLEMENTED / TESTED | Ownership is verified before attachment; cached handles retain creation-time/session and account checks. |
+| Shared bounded GPU collector | IMPLEMENTED / TESTED | Nonblocking transition path; stale and unavailable samples remain missing. |
+| Dedicated GPU memory | IMPLEMENTED / TESTED / BLOCKED | DTO and collector fixtures pass; live supported counters unavailable; adapter values remain separate. |
+| Recovery attempts and successes | IMPLEMENTED / TESTED | Durable defaults, generation checks, deduplication, manual-launch exclusion and per-account isolation. |
+| Authenticated diagnostics export | IMPLEMENTED / TESTED | Explicit fields, fresh metrics and bounded history; secrets, destinations, logs, trackers and paths excluded. |
+| Numbered beta identities | IMPLEMENTED / TESTED | Rust/C# ordering, legacy recognition and beta opt-in; fixture Windows numeric metadata is 1.8.4.0. |
+| Fork publishing preparation | IMPLEMENTED / TESTED / BLOCKED | Fork IDs and upstream rejection; reviewed-main checks; disabled workflow and unenrolled owner policy. |
+| Hidden Balanced comparison | IMPLEMENTED / EXPERIMENTAL / BLOCKED | Harness-only condition; production Headless remains Low Resource; no live measurements. |
+| Launcher restart and different-game isolation | IMPLEMENTED / BLOCKED | Harness scenarios added; native interrupted-supervision fixture passes; two-account acceptance outstanding. |
+| Idle activity | EXPERIMENTAL / BLOCKED | Default off and separately opted in; 25/60-minute baseline, activity and recovery observations outstanding. |
+| Provider matrix and peer continuity | BLOCKED | Dedicated accounts, authorized experiences and all claimed providers unavailable. |
+| Network-only, external per-process 1 FPS, renderer-off | UNSUPPORTED | No supported functionality established under the permitted interfaces. |
 
-Headless activity temporarily shows the window only after 60 seconds without desktop input.
-Busy desktops and denied focus can defer activity beyond Roblox's idle timeout; no prevention guarantee is made.
-Normal accounts retain their existing 120 FPS/quality 10 settings; reduced Headless GPU or RAM use has not been measured.
+## Executed automated checks
 
-Routine full-state reads now follow two-second samples instead of every 100 ms; window/input cancellation checks retain the faster cadence.
-This removes redundant launcher state copies; no Roblox savings or CPU percentage is inferred.
+- 103 regular Rust tests pass; six explicit live/UI fixtures remain ignored by default.
+- Three isolated native Windows fixtures cover policies, occlusion, metrics, restoration and session events.
+- 119 desktop assertions, native WinUI smoke and authenticated Rust/UI bridge pass.
+- Seven report, three archive, eight beta-publication, 32 fork-promotion, 14 hotfix and 25 owner-evidence fixtures pass.
+- Isolated Rust/C# beta metadata retains full 1.8.4-beta.1 strings and numeric Windows version 1.8.4.0.
+- Strict all-target Clippy, formatting, real-dependency offline adapter checks and installer/update fixtures pass.
 
-## Roblox measurements
+The initial sandbox run could not access Windows DPAPI; the suite passed with the normal user token outside the sandbox.
+Credential protection was unchanged; no personal Roblox session was controlled.
+These are fixture results, not Roblox performance or continuity measurements.
 
-| Condition | CPU / working/private RAM / GPU / frames / restore latency |
-| --- | --- |
-| Visible Normal/Default | BLOCKED / not measured |
-| Pure Minimized/Default | BLOCKED / not measured |
-| Pure Hidden/Default | BLOCKED / not measured |
-| Optimized Headless | BLOCKED / not measured |
-| Visible Balanced | BLOCKED / not measured |
-| Minimized Low Resource | BLOCKED / not measured |
-| Headless EcoQoS disabled | BLOCKED / not measured |
-| Headless ignore-timer-resolution | BLOCKED / not measured |
-| External opaque occlusion | BLOCKED / not measured |
+## Packaging and source correspondence
 
-All provider launches, two-account comparisons, restoration latency and 25/60-minute idle/activity observations remain BLOCKED.
-No launcher-only or uncontrolled process snapshot is used as a Roblox savings comparison.
-Zero presentation events alone cannot establish rendering suppression.
+Artifacts carry the full development identity and include the executable, native desktop, WebView2 loader, notices, source and AGENTS.md.
+SHA256 and exact source/archive correspondence are verified with `scripts/verify-package.py --smoke-shell`.
+The final package-gate result is recorded separately in `target/stabilization-package-verification.log` and `target/stabilization-verification.md`.
 
-## Executed checks
+The source/configuration fingerprint and its exact scope are recorded in [machine-readable evidence](client-compatibility-report.json).
+The retained host inventory was observed for the 1.8.3 baseline; it is not a fresh inventory or a benchmark.
+Normal graphics, account data and bootstrapper choices are preserved; no shared graphics files or driver profiles are edited.
 
-- 98 regular Rust tests passed; six tests are explicitly ignored by default.
-- Three isolated native Windows fixtures passed; they do not certify Roblox behavior.
-- 107 desktop assertions, native WinUI smoke and authenticated Rust/UI bridge passed.
-- Six report, three archive and seven mocked beta-publication fixtures passed.
-- Upstream safeguards passed 30 promotion, 14 hotfix and 25 owner-evidence fixtures; nothing was published.
-- Native regular/semibold and executable-input font checks passed; inspected normal/small-window screenshots show corrected punctuation and readable labels.
-- Installer/update fixture passed checksum rejection, cancellation, exit handles, complete installation, restart and data preservation.
-- Strict all-target Clippy, formatting, release metadata and offline adapter checks passed.
-- Updated observer scripts compiled; Roblox input acceptance and DataStore behavior were not tested.
+## Unexecuted live gates
 
-Tests ran with the normal Windows user token for DPAPI and native UI access.
-Credential protection was not weakened.
-Windows 10/11 x64 is the only supported platform; Linux/Sober source adapters, desktop, CI, packaging and updates are removed.
-The production build script rejects non-Windows targets; remaining dependency versions are unchanged.
-The UI fixture initially sampled before its first compositor tick; it passed after adding a bounded progress wait.
+Public beta requires two authorized accounts to demonstrate launch, repeated switching, restoration, unchanged peer settings and connection continuity.
+Stable additionally requires the claimed provider matrix, equal-workload measurements, recovery tests and separate 25/60-minute observations.
+No resource savings, rendering suppression or uninterrupted uptime is claimed.
 
-See [acceptance workflow](client-acceptance.md), [resource measurements](performance-benchmarks.md), [session reliability](session-reliability.md) and [rendering research](NO-RENDER-RESEARCH.md).
-Package integrity, exact source correspondence and packaged-shell startup are checked after packaging; local results are recorded in `target/client-manager-checks/verification.md`.
+See [saved plan](PLAN-1.8.4-beta.1.md), [acceptance workflow](client-acceptance.md) and [performance evidence](performance-benchmarks.md).

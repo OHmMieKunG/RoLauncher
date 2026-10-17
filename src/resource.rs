@@ -71,6 +71,8 @@ pub struct AntiAfkSettings {
 
 #[derive(Clone, Debug, Default, Serialize)]
 pub struct RuntimeControls {
+    pub restoration_state: String,
+    pub applied_resource_mode: Option<ResourceMode>,
     pub client_mode: Option<crate::client::ClientMode>,
     pub window_state: String,
     pub process_uptime_seconds: Option<u64>,
@@ -82,12 +84,21 @@ pub struct RuntimeControls {
     pub page_faults_per_second: Option<f64>,
     pub gpu_percent: Option<f64>,
     pub gpu_engine: Option<String>,
+    pub gpu_sampled_at: Option<chrono::DateTime<chrono::Utc>>,
+    pub dedicated_gpu_memory_bytes: Option<u64>,
+    pub gpu_memory_by_adapter: Vec<GpuMemory>,
     pub unavailable: Vec<String>,
     pub resource_result: String,
     pub input_result: String,
     pub last_activity_attempt_at: Option<chrono::DateTime<chrono::Utc>>,
     pub last_input_submitted_at: Option<chrono::DateTime<chrono::Utc>>,
     pub roblox_acceptance: &'static str,
+}
+
+#[derive(Clone, Debug, Default, Deserialize, Serialize)]
+pub struct GpuMemory {
+    pub adapter: String,
+    pub dedicated_bytes: u64,
 }
 
 #[derive(Clone, Debug, Default, Serialize)]

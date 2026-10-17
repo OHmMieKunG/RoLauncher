@@ -32,8 +32,13 @@ fn main() {
     'Fixture data must remain byte-for-byte unchanged' | Set-Content -LiteralPath $taskSentinel
     $taskDataHash = (Get-FileHash -LiteralPath $taskSentinel).Hash
     & "$PSScriptRoot\build-installer.ps1" -DistributionDirectory $taskPayload -OutputDirectory $taskTest -TestInstaller
-    $taskVersion = [regex]::Match((Get-Content Cargo.toml -Raw), '(?m)^version = "(\d+\.\d+\.\d+(?:-dev\.[0-9a-f]{12})?)"').Groups[1].Value
+    $taskVersion = [regex]::Match((Get-Content Cargo.toml -Raw), '(?m)^version = "(\d+\.\d+\.\d+(?:-dev\.[0-9a-f]{12}|-beta\.[1-9][0-9]*)?)"').Groups[1].Value
     $taskInstaller = Join-Path $taskTest "rolauncher-v$taskVersion-setup-x64.exe"
+    $taskInfo = (Get-Item -LiteralPath $taskInstaller).VersionInfo
+    $taskNumeric = "$($taskInfo.FileMajorPart).$($taskInfo.FileMinorPart).$($taskInfo.FileBuildPart).$($taskInfo.FilePrivatePart)"
+    if ($taskNumeric -ne ($taskVersion.Split('-')[0] + '.0') -or $taskInfo.FileVersion.Trim() -ne $taskNumeric -or $taskInfo.ProductVersion.Trim() -ne $taskVersion) {
+        throw 'Installer must retain the full identity and numeric Windows metadata'
+    }
     $taskHash = (Get-FileHash -LiteralPath $taskInstaller -Algorithm SHA256).Hash
     $taskPowerShell = Join-Path $env:SystemRoot 'System32\WindowsPowerShell\v1.0\powershell.exe'
     $taskProcesses = @()

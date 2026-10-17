@@ -16,10 +16,13 @@ from uuid import UUID
 import zipfile
 from release_files import checked_files
 
-REPO = "oangsa/RoLauncher"
+REPO = "OHmMieKunG/RoLauncher"
+REPO_ID = 1422574717
+OWNER_ID = 180964824
 CI = ".github/workflows/ci-release.yml"
 BETA = ".github/workflows/beta-release.yml"
 STABLE_VERSION = r"(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)"
+BETA_VERSION = STABLE_VERSION + r"-beta\.[1-9][0-9]*"
 CHECKS = {"Branch flow", "Windows checks"}
 GITHUB_ACTIONS_ID = 15368  # Public GitHub Actions App, verified against hosted check runs.
 MAX_ARCHIVE_BYTES = 256 * 1024 * 1024
@@ -50,17 +53,29 @@ def unique_object(pairs):
 def authorize(call, run):
     require(run["repository"]["full_name"] == REPO and run["head_repository"]["full_name"] == REPO,
             "Foreign repository")
+    require(run["repository"].get("id") == REPO_ID and run["head_repository"].get("id") == REPO_ID, "Unexpected repository ID")
     sha = run["head_sha"]
     require(re.fullmatch(r"[a-f0-9]{40}", sha), "Invalid source identity")
     if run["path"] == BETA:
         tag = run["head_branch"]
-        require(run["event"] == "push" and re.fullmatch("beta-v" + STABLE_VERSION, tag), "Invalid beta tag trigger")
-        owner = call("")["owner"]
-        require(owner["login"] == "oangsa" and owner["type"] == "User" and run["actor"]["id"] == owner["id"],
+        require(run["event"] == "push" and (re.fullmatch("v" + BETA_VERSION, tag) or re.fullmatch("beta-v" + STABLE_VERSION, tag)), "Invalid beta tag trigger")
+        repository = call("")
+        owner = repository["owner"]
+        require(repository.get("id") == REPO_ID and owner["id"] == OWNER_ID and owner["login"] == "OHmMieKunG" and owner["type"] == "User" and run["actor"]["id"] == owner["id"],
                 "Beta tag push requires repository owner")
         require(promotion_state(call, tag, sha, annotated=True), "Beta tag is missing")
-        require(call(f"/compare/{sha}...dev")["status"] in ("ahead", "identical"), "Beta source is not in dev history")
-        return dict(schema=1, id="beta:" + tag, version=tag.removeprefix("beta-v"), channel="beta")
+        require(call("/branches/main")["commit"]["sha"] == sha, "Beta source must match reviewed fork main")
+        prs = call(f"/commits/{sha}/pulls?per_page=100")
+        require(len(prs) < 100, "Ambiguous beta review evidence")
+        reviewed = [call(f'/pulls/{p["number"]}') for p in prs]
+        require(any(p["merged"] and p["merge_commit_sha"] == sha and p["base"]["ref"] == "main"
+                    and p["base"]["repo"]["full_name"] == REPO and (p.get("merged_by") or {}).get("id") == OWNER_ID for p in reviewed), "Beta requires owner-reviewed fork main")
+        result = call(f"/actions/workflows/ci-release.yml/runs?head_sha={sha}&branch=main&event=push&status=success&per_page=100")
+        require(result["total_count"] == len(result["workflow_runs"]) and len(result["workflow_runs"]) < 100, "Incomplete beta main checks")
+        candidates = [r for r in result["workflow_runs"] if r["head_sha"] == sha and r["head_branch"] == "main" and r["event"] == "push" and r["path"] == CI and r["repository"].get("id") == REPO_ID and r["head_repository"].get("id") == REPO_ID]
+        require(candidates, "Successful checks for exact beta main commit required")
+        successful_jobs(call, max(candidates, key=lambda r:(r["id"], r["run_attempt"])), CHECKS)
+        return dict(schema=1, id="beta:" + tag, version=tag.removeprefix("beta-v") if tag.startswith("beta-v") else tag.removeprefix("v"), channel="beta")
     require(run["event"] == "push" and run["head_branch"] == "main" and run["path"] == CI,
             "Stable authority requires main push CI")
     commit = call(f"/commits/{sha}?per_page=100")
@@ -81,8 +96,9 @@ def authorize(call, run):
             "Stable version required")
     history = call(f"/commits?path={path}&sha={sha}&per_page=2")
     require(len(history) == 1, "Intent path was edited or reused")
-    owner = call("")["owner"]
-    require(owner["login"] == "oangsa" and owner["type"] == "User", "Unexpected repository owner")
+    repository = call("")
+    owner = repository["owner"]
+    require(repository.get("id") == REPO_ID and owner["id"] == OWNER_ID and owner["login"] == "OHmMieKunG" and owner["type"] == "User", "Unexpected repository owner")
     prs = call(f"/commits/{sha}/pulls?per_page=100")
     require(len(prs) < 100, "Ambiguous PR evidence")
     prs = [call(f'/pulls/{p["number"]}') for p in prs]
@@ -252,8 +268,9 @@ def promote(call, run, evidence=None):
     lock = tomllib.loads(content(call, "Cargo.lock", sha))
     require(manifest_version == version and next(p for p in lock["package"] if p["name"] == "rolauncher")["version"] == version
             and content(call, "README.md", sha).startswith(f"# RoLauncher {version}\n"), "Version metadata mismatch")
-    notes = content(call, f"docs/RELEASE-{version}.md", sha)
-    require(notes.startswith(f"# RoLauncher {version}\n") and len(notes.strip()) > 120
+    core = version.split("-", 1)[0]
+    notes = content(call, f"docs/RELEASE-{core}.md", sha)
+    require(notes.startswith(f"# RoLauncher {core}\n") and len(notes.strip()) > 120
             and "Describe the user-visible changes" not in notes, "Release notes mismatch")
     files, artifacts = artifact_files(call, run, version, beta)
     if intent.get('source') == 'hotfix':
@@ -265,7 +282,7 @@ def promote(call, run, evidence=None):
     receipt_data = (json.dumps(receipt, sort_keys=True, separators=(",", ":")) + "\n").encode()
     marker = "<!-- release-promotion:" + hashlib.sha256(receipt_data).hexdigest() + " -->"
     files["release-promotion.json"] = receipt_data
-    tag = ("beta-v" if beta else "v") + version
+    tag = ("beta-v" if beta and "-beta." not in version else "v") + version
     ref = promotion_state(call, tag, sha, annotated=beta)
     release = call("/releases/tags/" + tag, missing_ok=True)
     if release:
@@ -378,7 +395,7 @@ def github_api(token):
     def call(path, method="GET", body=None, missing_ok=False, binary=None, raw=False):
         url = path if path.startswith("https://") else "https://api.github.com/repos/" + REPO + path
         require(url.startswith("https://api.github.com/repos/" + REPO + "/") or url == "https://api.github.com/repos/" + REPO
-                or re.fullmatch(r"https://uploads.github.com/repos/oangsa/RoLauncher/releases/\d+/assets\?name=[A-Za-z0-9._-]+", url),
+                or re.fullmatch(r"https://uploads.github.com/repos/OHmMieKunG/RoLauncher/releases/\d+/assets\?name=[A-Za-z0-9._-]+", url),
                 "Refuse unexpected GitHub endpoint")
         data = binary if binary is not None else json.dumps(body).encode() if body is not None else None
         headers = {"Authorization": "Bearer " + token, "Accept": "application/vnd.github+json",

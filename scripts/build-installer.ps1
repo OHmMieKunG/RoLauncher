@@ -3,7 +3,7 @@ $ErrorActionPreference = 'Stop'
 $taskRoot = Split-Path -Parent $PSScriptRoot
 Push-Location -LiteralPath $taskRoot
 try {
-    $taskVersion = [regex]::Match((Get-Content Cargo.toml -Raw), '(?m)^version = "(\d+\.\d+\.\d+(?:-dev\.[0-9a-f]{12})?)"').Groups[1].Value
+    $taskVersion = [regex]::Match((Get-Content Cargo.toml -Raw), '(?m)^version = "(\d+\.\d+\.\d+(?:-dev\.[0-9a-f]{12}|-beta\.[1-9][0-9]*)?)"').Groups[1].Value
     if (-not $taskVersion) { throw 'Cannot determine installer version' }
     $taskPayload = (Resolve-Path -LiteralPath $DistributionDirectory).Path
     if (-not (Test-Path -LiteralPath (Join-Path $taskPayload 'RoLauncher.exe'))) { throw 'Installer payload is missing RoLauncher.exe' }

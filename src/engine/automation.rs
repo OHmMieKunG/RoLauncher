@@ -43,6 +43,15 @@ impl Engine {
         let mut managed: HashMap<String, crate::controls::Managed> = HashMap::new();
         #[cfg(windows)]
         let mut retiring: Vec<crate::controls::Managed> = Vec::new();
+        #[cfg(windows)]
+        let mut gpu = crate::gpu_collector::GpuCollector::new();
+        #[cfg(windows)]
+        let preexisting: HashMap<_, _> = self
+            .snapshot()
+            .accounts
+            .into_iter()
+            .filter_map(|a| a.process.map(|p| (a.id, p)))
+            .collect();
         let mut deadlines: HashMap<String, (ProcessIdentity, AntiAfkSettings, Deadline)> =
             HashMap::new();
         let mut last_tick = Instant::now();
@@ -137,15 +146,13 @@ impl Engine {
                 sample_at = now + Duration::from_secs(2);
                 let view = self.snapshot();
                 #[cfg(windows)]
-                let gpu = if view
+                if view
                     .accounts
                     .iter()
                     .any(|a| a.process.is_some() && a.client.monitoring)
                 {
-                    platform::gpu_engines()
-                } else {
-                    Err("No monitored instances".into())
-                };
+                    gpu.request();
+                }
                 #[cfg(windows)]
                 {
                     let outdated: Vec<_> = managed
@@ -188,7 +195,18 @@ impl Engine {
                     #[cfg(windows)]
                     {
                         // Verify outside the state lock, then recheck account ownership before OS actions.
-                        match platform::verify_controls(identity, account.generation) {
+                        let control = managed
+                            .entry(account.id.clone())
+                            .or_insert_with(|| crate::controls::Managed::new(identity.clone()));
+                        let verified = control.verified_process().and_then(|process| {
+                            control.attach_journal_once(
+                                self.data_directory(),
+                                &account.id,
+                                preexisting.get(&account.id) == Some(identity),
+                            )?;
+                            Ok(process)
+                        });
+                        match verified {
                             Ok(process) => {
                                 let state = self.0.state.lock().unwrap();
                                 let current = state
@@ -208,10 +226,6 @@ impl Engine {
                                 let account = current.unwrap().clone();
                                 let paused = state.anti_afk_paused;
                                 drop(state);
-                                let control =
-                                    managed.entry(account.id.clone()).or_insert_with(|| {
-                                        crate::controls::Managed::new(identity.clone())
-                                    });
                                 if account.client.monitoring {
                                     control.sample(&process, &mut result);
                                 }
@@ -262,20 +276,22 @@ impl Engine {
                                 }
                                 control.observed_mode(&mut result);
                                 control.activity_status(&mut result);
-                                if account.client.monitoring
-                                    && let Ok(values) = &gpu
-                                    && let Some((value, engine)) = values.get(&identity.pid)
-                                {
-                                    result.gpu_percent = Some(*value);
-                                    result.gpu_engine = Some(engine.clone());
-                                } else {
+                                if account.client.monitoring {
+                                    gpu.apply(identity, &mut result);
+                                }
+                                if result.gpu_percent.is_none() {
                                     result.unavailable.push(
                                         "GPU engine measurement unavailable for verified process"
                                             .into(),
                                     );
                                 }
+                                if result.dedicated_gpu_memory_bytes.is_none() {
+                                    result.unavailable.push("Dedicated GPU memory unavailable or requires individual adapter counters".into());
+                                }
                             }
                             Err(error) => {
+                                let _ = control
+                                    .discard_exited_journal(self.data_directory(), &account.id);
                                 result.resource_result = error;
                                 result.input_result =
                                     "Input unavailable: ownership verification failed".into();

@@ -1,6 +1,6 @@
 # Changelog
 
-## [1.8.3] — Unreleased
+## [1.8.4] — Unreleased (candidate 1.8.4-beta.1)
 
 ### Added
 
@@ -11,6 +11,7 @@
 - Monitor CPU, working set, private allocation, page faults, available GPU engines and separate process/connection uptime.
 - Launch, stop, hide or restore all accounts; retain preferences through presets and encrypted backups.
 - Opt into experimental Headless foreground activity while the PC is idle, with cancellation and bounded retries.
+- Export allowlisted current controls and fresh metrics, with separate recovery attempts, successful recoveries and disconnect details.
 - Keep Network-only unsupported; competing Bloxstrap/Fishstrap protocol registration remains unsupported.
 
 ### Changed

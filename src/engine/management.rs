@@ -2,6 +2,26 @@ use super::*;
 use serde::{Deserialize, Serialize};
 use std::collections::HashSet;
 
+fn diagnostic_environment() -> serde_json::Value {
+    #[cfg(windows)]
+    let windows = unsafe {
+        use windows_sys::Win32::System::SystemInformation::{GetVersionExW, OSVERSIONINFOW};
+        let mut info: OSVERSIONINFOW = std::mem::zeroed();
+        info.dwOSVersionInfoSize = std::mem::size_of_val(&info) as u32;
+        (GetVersionExW(&mut info) != 0).then(|| {
+            format!(
+                "{}.{}.{}",
+                info.dwMajorVersion, info.dwMinorVersion, info.dwBuildNumber
+            )
+        })
+    };
+    #[cfg(not(windows))]
+    let windows: Option<String> = None;
+    serde_json::json!({ "os": std::env::consts::OS, "architecture": std::env::consts::ARCH,
+        "windows_version": windows, "desktop_version": env!("CARGO_PKG_VERSION"),
+        "roblox_version": null, "bootstrapper_version": null, "webview2_version": null })
+}
+
 #[derive(Deserialize)]
 pub struct BulkPatch {
     pub account_ids: Vec<String>,
@@ -457,12 +477,29 @@ impl Engine {
             .collect()
     }
     pub fn diagnostics(&self) -> serde_json::Value {
+        // Environment inspection happens before taking the application lock.
+        let environment = diagnostic_environment();
         let s = self.0.state.lock().unwrap();
-        // Allowlist only: no aliases, private destinations, trackers, errors, tokens or credentials.
-        serde_json::json!({ "version": env!("CARGO_PKG_VERSION"), "generated_at": Utc::now(), "network_suspended": s.network_suspended,
+        let now = Utc::now();
+        serde_json::json!({ "version": env!("CARGO_PKG_VERSION"), "generated_at": now, "network_suspended": s.network_suspended,
+            "environment": environment,
             "live_validation": "See docs/VALIDATION.md; unperformed checks remain unverified",
-            "accounts": s.database.accounts.iter().map(|a| serde_json::json!({"id": a.account.id,"status": a.account.status,"failures": a.account.failures,"next_retry": a.account.next_retry,"verified_pid": a.account.process.as_ref().map(|p|p.pid),"fallback_policy": a.account.fallback_policy,"public_fallback_active": a.account.public_fallback_active})).collect::<Vec<_>>(),
-            "activity": s.database.activity })
+            "accounts": s.database.accounts.iter().map(|saved| {
+                let a = &saved.account;
+                let runtime = s.runtime_controls.get(&a.id).filter(|r| a.process.is_some() && r.identity == a.process && r.sampled_at.is_some_and(|at| (0..=6).contains(&(now-at).num_seconds())));
+                let gpu = runtime.filter(|r| r.gpu_sampled_at.is_some_and(|at| (0..=6).contains(&(now-at).num_seconds())));
+                serde_json::json!({"id": a.id,"status": a.status,"failures": a.failures,"next_retry": a.next_retry,"verified_pid": a.process.as_ref().map(|p|p.pid),"fallback_policy": a.fallback_policy,"public_fallback_active": a.public_fallback_active,
+                    "requested_client_mode": a.client.mode, "requested_resource": a.resource, "effective_resource_mode": a.resource.effective_mode(a.client.mode),
+                    "applied_client_mode": runtime.and_then(|r|r.client_mode), "applied_resource_mode": runtime.and_then(|r|r.applied_resource_mode), "window_state": runtime.map(|r| match r.window_state.as_str() { "hidden"=>"hidden", "minimized"=>"minimized", "visible"=>"visible", _=>"unavailable" }), "restoration_state": runtime.map(|r| match r.restoration_state.as_str() { "pending" => "pending", "baseline_captured" => "baseline_captured", "no_pending_changes" => "no_pending_changes", _ => "unavailable" }),
+                    "sampled_at": runtime.and_then(|r|r.sampled_at), "cpu_percent": runtime.and_then(|r|r.cpu_percent), "working_set_bytes": runtime.and_then(|r|r.working_set_bytes), "private_bytes": runtime.and_then(|r|r.private_bytes), "page_faults_per_second": runtime.and_then(|r|r.page_faults_per_second),
+                    "gpu_sampled_at": gpu.and_then(|r|r.gpu_sampled_at), "gpu_percent": gpu.and_then(|r|r.gpu_percent), "dedicated_gpu_memory_bytes": gpu.and_then(|r|r.dedicated_gpu_memory_bytes),
+                    "gpu_memory_by_adapter": gpu.map(|r|r.gpu_memory_by_adapter.iter().filter(|m|m.adapter.starts_with("luid_") && m.adapter.len()<=100 && m.adapter.bytes().all(|c|c.is_ascii_alphanumeric() || c==b'_')).map(|m|serde_json::json!({"adapter":m.adapter,"dedicated_bytes":m.dedicated_bytes})).collect::<Vec<_>>()),
+                    "process_uptime_seconds": runtime.and_then(|r|r.process_uptime_seconds), "connection_uptime_seconds": a.connected_since.filter(|_|a.status==Status::Running).map(|at|(now-at).num_seconds().max(0)), "managed_run_seconds": a.running_since.map(|at|(now-at).num_seconds().max(0)),
+                    "recovery_attempts": a.reconnection_attempts, "successful_recoveries": a.successful_recoveries, "last_disconnect": a.last_disconnect, "last_disconnect_code": a.last_disconnect_code,
+                    "last_disconnect_reason": a.last_disconnect_reason.as_deref().filter(|reason|matches!(*reason,"disconnected"|"connection_failed"|"join_request_failed"|"session_lost"|"process_exit"))
+                })
+            }).collect::<Vec<_>>(),
+            "activity": s.database.activity.iter().rev().take(100).map(|event|serde_json::json!({"timestamp":event.timestamp,"account_id":event.account_id,"status":event.status,"failures":event.failures})).collect::<Vec<_>>() })
     }
     pub fn backup(&self) -> Result<String, String> {
         let s = self.0.state.lock().unwrap();

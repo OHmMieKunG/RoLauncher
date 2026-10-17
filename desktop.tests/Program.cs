@@ -45,6 +45,18 @@ Check(row.Destination == "Place 999", "Changing a destination discards the previ
 row.Update(account with { Target = null });
 Check(row.Destination == "Choose a game", "An account without a destination prompts game selection.");
 row.Update(account);
+Check(account.SuccessfulRecoveries == 0 && account.LastDisconnectReason is null, "Older account DTOs keep safe recovery defaults.");
+var telemetry = new RuntimeControls(null, DateTimeOffset.UtcNow, 1, 1024, 2, "fixture", [], "fixture", "fixture", "unverified",
+    DedicatedGpuMemoryBytes: 1048576, GpuSampledAt: DateTimeOffset.UtcNow);
+row.SetRuntime(telemetry);
+Check(row.ResourceSummary.Contains("1.0 MiB"), "Dedicated GPU memory is displayed separately.");
+row.SetRuntime(telemetry with { GpuSampledAt = DateTimeOffset.UtcNow.AddSeconds(-10) });
+Check(row.ResourceSummary.Contains("Dedicated GPU memory unavailable"), "Fresh CPU telemetry cannot make stale GPU telemetry look current.");
+row.SetRuntime(telemetry with { SampledAt = DateTimeOffset.UtcNow.AddSeconds(10) });
+Check(row.ControlSummary == "No verified process measurements", "Future samples are unavailable.");
+row.Update(account with { SuccessfulRecoveries = 2, ReconnectionAttempts = 3 });
+Check(row.SessionSummary.Contains("Recovery attempts: 3 | Successful recoveries: 2"), "Attempts and successful recoveries stay separate.");
+row.Update(account);
 
 Check(AccountFilter.Matches(account, " MY ACCOUNT ", "", ""), "Search ignores case and surrounding whitespace.");
 Check(AccountFilter.Matches(account, "@SAMP", "running", "on"), "Search matches username with status and rejoin filters.");

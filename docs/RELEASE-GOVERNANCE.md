@@ -20,7 +20,7 @@ Do not expose repository secrets, write credentials or shared executable caches 
 
 The existing PR01 contract remains unchanged: one newly added `.github/release-intents/<UUIDv4>.json`.
 Its exact fields are `schema=1`, `id=<UUIDv4>`, `version=<MAJOR.MINOR.PATCH>` and `channel=stable`.
-Only an official `dev` PR merged into official `main` by repository owner `oangsa` qualifies.
+Only an official `dev` PR merged into official `main` by repository owner `OHmMieKunG` qualifies.
 
 The intent must first appear in that promotion, with exactly one path-history entry.
 Development versions, changed/reintroduced intents, foreign PRs and ambiguous evidence fail closed.
@@ -119,8 +119,13 @@ Independent review, signing policy enrollment, public disclosure approval, real 
 ## Beta compatibility
 
 Beta builds remain read-only; tag-local publication is removed.
-The trusted publisher retains PR01's owner-pushed `beta-vMAJOR.MINOR.PATCH`, dev-history and prerelease/never-latest policy.
+New candidates use owner-pushed `vMAJOR.MINOR.PATCH-beta.N`; historical `beta-vMAJOR.MINOR.PATCH` remains recognized.
+The source must equal reviewed fork `main`, with successful Branch flow and Windows checks for that exact commit.
+Beta discovery is opt-in; stable supersedes matching beta and development identities; betas never become latest.
 Historical beta tags retain legacy workflows; restrict new beta tag creation and never rerun old privileged jobs.
 
 The legacy beta library seam remains solely for compatibility tests; its CLI delegates to the protected boundary.
 No workflow calls that library directly or gives it candidate build credentials with write access.
+
+The only publisher repository is `OHmMieKunG/RoLauncher` (ID `1422574717`), owned by user ID `180964824`.
+Upstream repository identities and upload paths are rejected; the workflow remains hard-disabled and the owner policy unenrolled.

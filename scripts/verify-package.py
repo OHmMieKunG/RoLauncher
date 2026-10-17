@@ -13,7 +13,7 @@ from versioning import core
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 root = Path(__file__).resolve().parent.parent
-version = re.search(r'^version = "(\d+\.\d+\.\d+(?:-dev\.[0-9a-f]{12})?)"', (root / "Cargo.toml").read_text(encoding="utf-8"), re.M)[1]
+version = re.search(r'^version = "(\d+\.\d+\.\d+(?:-dev\.[0-9a-f]{12}|-beta\.[1-9][0-9]*)?)"', (root / "Cargo.toml").read_text(encoding="utf-8"), re.M)[1]
 name = f"rolauncher-v{version}"
 dist = root / "dist"
 parser = argparse.ArgumentParser()
@@ -31,13 +31,19 @@ with (dist / f"{name}-setup-x64.exe").open("rb") as installer:
 with zipfile.ZipFile(dist / f"{name}-source.zip") as source:
     assert source.testzip() is None
     paths = {p.replace("\\", "/"): p for p in source.namelist()}
+    for filename, entry in paths.items():
+        if filename.endswith("/"): continue
+        relative = Path(filename)
+        assert not relative.is_absolute() and ".." not in relative.parts, "Unsafe source archive path"
+        actual = root / relative
+        assert actual.is_file() and source.read(entry) == actual.read_bytes(), filename
     for filename in ["Cargo.toml", "Cargo.lock", "AGENTS.md", "global.json", "Directory.Build.props", "src/client.rs", "src/bootstrapper.rs", "src/resource.rs", "src/control_policy.rs", "src/controls.rs", "src/controls_windows.rs", "src/engine/automation.rs", "README.md", "src/engine/management.rs",
                      "docs/headless-architecture.md", "docs/network-only-feasibility.md", "docs/bootstrapper-integration.md", "docs/session-reliability.md", "docs/performance-benchmarks.md",
                      "src/client_acceptance.rs", "scripts/client-acceptance.ps1", "scripts/client-report.py", "scripts/test-client-report.py",
                      "scripts/create-archive.py", "scripts/test-create-archive.py",
                      "scripts/acceptance/config.example.json", "scripts/acceptance/observer.server.luau", "scripts/acceptance/observer.client.luau", "scripts/acceptance/export-observer.luau",
                      "docs/client-acceptance.md", "docs/client-compatibility-report.md", "docs/client-compatibility-report.json",
-                     "src/updates.rs", "desktop/MainWindow.Management.cs", "desktop/MainWindow.Workspace.cs",
+                     "src/updates.rs", "src/control_journal.rs", "src/gpu_collector.rs", "desktop/MainWindow.Management.cs", "desktop/MainWindow.Workspace.cs",
                      "desktop/MainWindow.xaml", "desktop/MainWindow.xaml.cs", "desktop/BulkDraft.cs",
                      f"docs/RELEASE-{core(version)}.md", "docs/VALIDATION.md", "docs/API.md", "docs/USAGE.md",
                      "docs/DEVELOPMENT.md", "docs/PERFORMANCE.md", "desktop/packages.lock.json",

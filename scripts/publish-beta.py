@@ -1,12 +1,14 @@
 """Publish checked Windows artifacts as a prerelease, preserving stable/latest."""
 import hashlib
+from versioning import core
 from release_files import checked_files
 
 
 def publish(call, files, version, sha, notes):
+    core(version)
     if "-dev." in version:
         raise ValueError("Development builds must never be published to GitHub; prepare an intentional stable/beta release first")
-    tag = "beta-v" + version
+    tag = ("v" if "-beta." in version else "beta-v") + version
     existing_tag = call("/git/ref/tags/" + tag)
     obj = existing_tag["object"]
     if obj["type"] == "tag":
@@ -32,7 +34,7 @@ def publish(call, files, version, sha, notes):
             "body": body, "draft": True, "prerelease": True, "make_latest": "false",
         })
     upload = release["upload_url"].split("{")[0]
-    if not upload.startswith("https://uploads.github.com/repos/oangsa/RoLauncher/releases/"):
+    if not upload.startswith("https://uploads.github.com/repos/OHmMieKunG/RoLauncher/releases/"):
         raise ValueError("Unexpected upload host")
     path = "/releases/" + str(release["id"])
     assets = {asset["name"]: asset for asset in call(path + "/assets")}

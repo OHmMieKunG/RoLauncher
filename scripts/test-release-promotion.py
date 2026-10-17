@@ -39,7 +39,7 @@ def promote_event(call, event, channel=None):
 SHA = "a" * 40
 INTENT = "12345678-1234-4234-8234-123456789abc"
 PATH = ".github/release-intents/" + INTENT + ".json"
-REPO = "oangsa/RoLauncher"
+REPO = "OHmMieKunG/RoLauncher"
 
 
 class GitHubFixture:
@@ -47,11 +47,11 @@ class GitHubFixture:
         self.writes = []
         self.run = dict(id=12, run_attempt=1, head_sha=SHA, head_branch="main", event="push",
                         status="completed", conclusion="success", path=".github/workflows/ci-release.yml",
-                        repository={"full_name": REPO}, head_repository={"full_name": REPO})
+                        repository={"full_name": REPO, "id": 1422574717}, head_repository={"full_name": REPO, "id": 1422574717})
         self.files = [{"filename": "README.md", "status": "modified"}]
         self.intent = dict(schema=1, id=INTENT, version="2.3.4", channel="stable")
         self.intent_json = None
-        self.pr = dict(merged=True, merge_commit_sha=SHA, merged_by={"id": 7},
+        self.pr = dict(merged=True, merge_commit_sha=SHA, merged_by={"id": 180964824},
                        base={"ref": "main", "repo": {"full_name": REPO}},
                        head={"ref": "dev", "repo": {"full_name": REPO}})
         self.history = [{"sha": "b" * 40}]
@@ -98,7 +98,9 @@ class GitHubFixture:
         return self
 
     def with_beta(self):
-        self.run.update(path=".github/workflows/beta-release.yml", head_branch="beta-v2.3.4", actor={"id": 7})
+        self.main_run = copy.deepcopy(self.run)
+        self.main_run["id"] = 13
+        self.run.update(path=".github/workflows/beta-release.yml", head_branch="beta-v2.3.4", actor={"id": 180964824})
         self.jobs = [j for j in self.jobs if j["name"] != "Branch flow"]
         self.artifacts[0]["name"] = "beta-windows-attempt-1"
         self.tag = {"object": {"type": "commit", "sha": SHA}}
@@ -136,7 +138,7 @@ class GitHubFixture:
         if path in ("/commits/" + SHA, "/commits/" + SHA + "?per_page=100"):
             return {"files": self.files}
         if path == "":
-            return {"full_name": REPO, "owner": {"id": 7, "login": "oangsa", "type": "User"}}
+            return {"id": 1422574717, "full_name": REPO, "owner": {"id": 180964824, "login": "OHmMieKunG", "type": "User"}}
         if path == "/commits/" + SHA + "/pulls?per_page=100":
             return [{"number": 4}]
         if path == "/pulls/4": return self.pr
@@ -158,7 +160,8 @@ class GitHubFixture:
         if path == "/rulesets/2": return self.branch_ruleset
         if path == "/actions/runs/12/attempts/1/jobs?per_page=100": return {"jobs": self.jobs, "total_count": len(self.jobs)}
         if path.startswith("/actions/workflows/linux.yml/runs?"): return {"workflow_runs": [self.linux_run], "total_count": 1}
-        if path.startswith("/actions/workflows/ci-release.yml/runs?"): return {"workflow_runs": [self.run], "total_count": 1}
+        if path.startswith("/actions/workflows/ci-release.yml/runs?"): return {"workflow_runs": [getattr(self, "main_run", self.run)], "total_count": 1}
+        if path == "/actions/runs/13/attempts/1/jobs?per_page=100": return {"jobs": [{"name": n, "conclusion": "success", "head_sha": SHA} for n in ("Branch flow", "Windows checks")], "total_count": 2}
         if path == "/actions/runs/12": return self.run
         if path == "/actions/workflows/release-promotion.yml": return {"state": self.publisher_state}
         if path == "/actions/runs/12/artifacts?per_page=100": return {"artifacts": self.artifacts, "total_count": len(self.artifacts)}
@@ -175,6 +178,32 @@ class GitHubFixture:
 
 
 class PromotionTests(unittest.TestCase):
+    def test_fork_numeric_identity_and_upstream_rejection(self):
+        for repository, repository_id in [("oangsa/RoLauncher", 1406138209), (REPO, 1406138209)]:
+            github = GitHubFixture().with_intent()
+            github.run["repository"].update(full_name=repository, id=repository_id)
+            with self.assertRaises(ValueError): authorize(github, github.run)
+            self.assertEqual(github.writes, [])
+
+    def test_beta_requires_exact_reviewed_main_and_successful_checks(self):
+        github = GitHubFixture().with_beta()
+        self.assertEqual(authorize(github, github.run)["channel"], "beta")
+        github.run["head_branch"] = "v2.3.4-beta.10"
+        tag_call = github.__call__
+        def numbered(path, *args, **kwargs):
+            return github.tag if path == "/git/ref/tags/v2.3.4-beta.10" else tag_call(path, *args, **kwargs)
+        self.assertEqual(authorize(numbered, github.run)["version"], "2.3.4-beta.10")
+        github.run["head_branch"] = "beta-v2.3.4"
+        github.branch["commit"]["sha"] = "b" * 40
+        with self.assertRaisesRegex(ValueError, "reviewed fork main"): authorize(github, github.run)
+        github.branch["commit"]["sha"] = SHA
+        github.main_run["head_sha"] = "b" * 40
+        with self.assertRaisesRegex(ValueError, "exact beta main"): authorize(github, github.run)
+        github.main_run["head_sha"] = SHA
+        github.pr["merged_by"]["id"] = 7
+        with self.assertRaisesRegex(ValueError, "owner-reviewed"): authorize(github, github.run)
+        self.assertEqual(github.writes, [])
+
     def test_zip_directory_metadata_is_bounded_before_parsing_entries(self):
         github = GitHubFixture().with_intent()
         with zipfile.ZipFile(io.BytesIO(github.archives[30])) as original:

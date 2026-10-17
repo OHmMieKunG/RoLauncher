@@ -16,6 +16,8 @@ CASES = (
     "restoration_latency", "unexpected_exit_recovery", "server_disconnect_recovery",
     "stop_restart_peer_isolation", "idle_25_minutes", "idle_60_minutes",
     "activity_25_minutes_no_recovery", "activity_60_minutes_no_recovery", "headless_power_experiments",
+    "test_only_hidden_balanced", "different_game_isolation", "launcher_restart_restoration",
+    "idle_recovery_25_minutes", "idle_recovery_60_minutes",
 )
 
 
@@ -25,7 +27,7 @@ def distribution(values):
         return None
     return {"count": len(values), "mean": statistics.fmean(values),
             "median": statistics.median(values), "p95": values[math.ceil(len(values) * .95) - 1],
-            "min": values[0], "max": values[-1]}
+            "min": values[0], "max": values[-1], "peak": values[-1]}
 
 
 def timestamp(text):
@@ -74,7 +76,9 @@ def continuity(events, export):
         input_points = [p for p in relevant if all(type(p.get(key)) is int and 0 <= p[key] <= 1000000
                         for key in ("input_count", "idle_event_count"))]
         activity_run = begin.get("scenario") in ("Activity25", "Activity60")
-        duration_required = {"Activity25": 1500, "Activity60": 3600}.get(begin.get("scenario"), 0)
+        duration_required = {"Activity25": 1500, "Activity60": 3600, "Idle25": 1500, "Idle60": 3600,
+                             "IdleRecovery25": 1500, "IdleRecovery60": 3600}.get(begin.get("scenario"), 0)
+        duration_complete = end - start >= (duration_required - 2) * 1000
         activity_evidence = (not activity_run or (end - start >= (duration_required - 2) * 1000
             and len(input_points) == len(relevant) and len(input_points) >= 2
             and input_points[-1]["input_count"] > input_points[0]["input_count"]
@@ -82,10 +86,11 @@ def continuity(events, export):
                     for a, b in zip(input_points, input_points[1:]))
             and any(input_in_interval(a, start, end) for a in client)))
         results[account_id] = {"connections_observed": len(records),
+                               "observation_duration_complete": duration_complete,
                                "input_events_observed": input_points[-1]["input_count"] - input_points[0]["input_count"] if len(input_points) >= 2 else None,
                                "idle_events_observed": input_points[-1]["idle_event_count"] - input_points[0]["idle_event_count"] if len(input_points) >= 2 else None,
                                "activity_evidence_complete": activity_evidence if activity_run else None,
-                               "continuous_connection_and_progress": bool(record.get("nonce") and covering and progress and backend_steady and activity_evidence)}
+                               "continuous_connection_and_progress": bool(record.get("nonce") and covering and progress and backend_steady and activity_evidence and duration_complete)}
     return {"status": "EVIDENCE_COMPLETE" if ids and all(v["continuous_connection_and_progress"] for v in results.values()) else "UNVERIFIED",
             "accounts": results, "reason": "Connection intervals remain separate after recovery; this is not a gameplay pass"}
 
@@ -147,6 +152,14 @@ def summarize(events, directory, export=None):
         result["gpu_engines"] = {name: distribution(values) for name, values in target["gpu"].items()}
         result["gpu_adapter_mapping"] = "LUID/physical index in engine name; correlate with ETW adapter inventory"
         result["total_gpu_percent"] = None
+        observations = [a for e in events if e.get("event") == "sample" and e.get("phase") == phase
+                        for a in e["accounts"] if a.get("account_id") == target["account_id"]]
+        result["test_only"] = "test_only_hidden_balanced" in phase
+        result["effective_policies"] = [{key: s[key] if type(s.get(key)) is int and 0 <= s[key] <= 0xffffffff else None for key in ("priority", "power_control_mask", "power_state_mask", "memory_priority")}
+                                        for s in target["samples"]]
+        result["missing_telemetry"] = {key: sum(a.get(key) is None for a in observations)
+                                        for key in ("sampled_at", "gpu_sampled_at", "dedicated_gpu_memory_bytes")}
+        result["dedicated_gpu_memory_bytes"] = distribution([a.get("dedicated_gpu_memory_bytes") for a in observations])
         frame_file = directory / f"{phase}-presentmon.csv"
         result["frames"] = frames(frame_file, target["pid"]) if frame_file.is_file() and target["pid"] else None
         peer = next((a for e in events if e.get("event") == "sample" and e.get("phase") == phase

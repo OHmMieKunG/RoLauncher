@@ -13,7 +13,8 @@ public sealed record Account(string Id, string Username, string Alias, Target? T
     [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] ResourceSettings? Resource = null,
     [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] AntiAfkSettings? AntiAfk = null,
     [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] ClientSettings? Client = null,
-    DateTimeOffset? ConnectedSince = null, DateTimeOffset? DisconnectedSince = null, DateTimeOffset? LastDisconnect = null, ulong ReconnectionAttempts = 0)
+    DateTimeOffset? ConnectedSince = null, DateTimeOffset? DisconnectedSince = null, DateTimeOffset? LastDisconnect = null, ulong ReconnectionAttempts = 0,
+    ulong SuccessfulRecoveries = 0, string? LastDisconnectReason = null, uint? LastDisconnectCode = null)
 {
     [System.Text.Json.Serialization.JsonIgnore]
     public ResourceSettings ResourceOptions => Resource ?? new();
@@ -50,7 +51,8 @@ public sealed class AccountRow(Account account) : INotifyPropertyChanged
 {
     public Account Account { get; private set; } = account;
     private RuntimeControls? _runtime;
-    public string ResourceSummary => $"CPU {(_runtime?.CpuPercent is { } cpu ? $"{cpu:F1}%" : "unavailable")} | Working set {(_runtime?.WorkingSetBytes is { } memory ? $"{memory / 1048576.0:F1} MiB" : "unavailable")}\nPrivate {(_runtime?.PrivateBytes is { } allocation ? $"{allocation / 1048576.0:F1} MiB" : "unavailable")} | Page faults {(_runtime?.PageFaultsPerSecond is { } faults ? $"{faults:F1}/s (includes soft faults)" : "unavailable")}\nGPU {(_runtime?.GpuPercent is { } gpu ? $"{gpu:F1}% ({_runtime.GpuEngine})" : "unavailable")}";
+    private bool GpuFresh => _runtime?.GpuSampledAt is { } at && DateTimeOffset.UtcNow >= at && DateTimeOffset.UtcNow - at < TimeSpan.FromSeconds(6);
+    public string ResourceSummary => $"CPU {(_runtime?.CpuPercent is { } cpu ? $"{cpu:F1}%" : "unavailable")} | Working set {(_runtime?.WorkingSetBytes is { } memory ? $"{memory / 1048576.0:F1} MiB" : "unavailable")}\nPrivate {(_runtime?.PrivateBytes is { } allocation ? $"{allocation / 1048576.0:F1} MiB" : "unavailable")} | Page faults {(_runtime?.PageFaultsPerSecond is { } faults ? $"{faults:F1}/s (includes soft faults)" : "unavailable")}\nGPU {(GpuFresh && _runtime?.GpuPercent is { } gpu ? $"{gpu:F1}% ({_runtime.GpuEngine})" : "unavailable")} | Dedicated GPU memory {(GpuFresh && _runtime?.DedicatedGpuMemoryBytes is { } vram ? $"{vram / 1048576.0:F1} MiB" : "unavailable")}";
     public string ControlSummary => _runtime is null ? "No verified process measurements" : $"{_runtime.ResourceResult}\n{_runtime.InputResult}\nActivity attempted: {_runtime.LastActivityAttemptAt?.ToLocalTime().ToString("T") ?? "never"} | OS input submitted: {_runtime.LastInputSubmittedAt?.ToLocalTime().ToString("T") ?? "never"}\nSample: {_runtime.SampledAt?.ToLocalTime():T}\n{string.Join("; ", _runtime.Unavailable ?? [])}";
     private static string ClientLabel(string value) => value switch
     {
@@ -59,10 +61,11 @@ public sealed class AccountRow(Account account) : INotifyPropertyChanged
         "balanced" => "Balanced", "low_resource" => "Low Resource", _ => value
     };
     public string ClientSummary => $"{ClientLabel(Account.ClientOptions.Bootstrapper)} | requested {ClientLabel(Account.ClientOptions.Mode)} | {(_runtime?.ClientMode is { } mode ? $"observed {ClientLabel(mode)}" : "mode unverified")} | {(Account.ResourceOptions.Mode == "normal" ? "Default" : ClientLabel(Account.ResourceOptions.Mode))}";
-    public string SessionSummary => $"Window: {_runtime?.WindowState ?? "unavailable"} | Process: {(_runtime?.ProcessUptimeSeconds is { } seconds ? FormatDuration(seconds) : "unavailable")} | Connection: {(Account.Status == "running" && Account.ConnectedSince is { } since ? FormatDuration((ulong)Math.Max(0, (DateTimeOffset.UtcNow - since).TotalSeconds)) : "unverified")}\nRecovery attempts: {Account.ReconnectionAttempts} | Last disconnect: {Account.LastDisconnect?.ToLocalTime().ToString("g") ?? "none recorded"}";
+    public string SessionSummary => $"Window: {_runtime?.WindowState ?? "unavailable"} | Process: {(_runtime?.ProcessUptimeSeconds is { } seconds ? FormatDuration(seconds) : "unavailable")} | Connection: {(Account.Status == "running" && Account.ConnectedSince is { } since ? FormatDuration((ulong)Math.Max(0, (DateTimeOffset.UtcNow - since).TotalSeconds)) : "unverified")}\nManaged run: {RunningTime} | Recovery attempts: {Account.ReconnectionAttempts} | Successful recoveries: {Account.SuccessfulRecoveries}\nLast disconnect: {Account.LastDisconnect?.ToLocalTime().ToString("g") ?? "none recorded"} | {Account.LastDisconnectReason ?? "unavailable"} {Account.LastDisconnectCode}";
     public void SetRuntime(RuntimeControls? runtime)
     {
-        _runtime = runtime?.SampledAt is { } at && DateTimeOffset.UtcNow - at < TimeSpan.FromSeconds(6) ? runtime : null;
+        var age = runtime?.SampledAt is { } at ? DateTimeOffset.UtcNow - at : TimeSpan.MaxValue;
+        _runtime = age >= TimeSpan.Zero && age < TimeSpan.FromSeconds(6) ? runtime : null;
         PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(ResourceSummary)));
         PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(ControlSummary)));
         PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(ClientSummary)));
@@ -134,7 +137,10 @@ public sealed record RuntimeControls(ProcessInfo? Identity, DateTimeOffset? Samp
     double? GpuPercent, string? GpuEngine, string[]? Unavailable, string ResourceResult, string InputResult, string RobloxAcceptance,
     string? ClientMode = null, string WindowState = "unavailable", ulong? ProcessUptimeSeconds = null,
     ulong? PrivateBytes = null, double? PageFaultsPerSecond = null,
-    DateTimeOffset? LastActivityAttemptAt = null, DateTimeOffset? LastInputSubmittedAt = null);
+    DateTimeOffset? LastActivityAttemptAt = null, DateTimeOffset? LastInputSubmittedAt = null,
+    ulong? DedicatedGpuMemoryBytes = null, DateTimeOffset? GpuSampledAt = null, GpuMemory[]? GpuMemoryByAdapter = null,
+    string RestorationState = "unavailable", string? AppliedResourceMode = null);
+public sealed record GpuMemory(string Adapter, ulong DedicatedBytes);
 public sealed record ClientSettings(string Mode = "normal", string Bootstrapper = "system", string? Executable = null,
     bool AutoHide = false, bool StartOnOpen = false, bool Monitoring = true);
 public sealed record BootstrapperInstallation(string Provider, string? Executable, string? Configuration, bool Available, string Reason)

@@ -19,6 +19,8 @@ try {
     if ($LASTEXITCODE -ne 0) { throw 'Owner evidence checks failed' }
     & cargo test --locked
     if ($LASTEXITCODE -ne 0) { throw 'Tests failed' }
+    & "$PSScriptRoot\test-beta-metadata.ps1"
+    if ($LASTEXITCODE -ne 0) { throw 'Beta metadata checks failed' }
     & cargo fmt --check
     if ($LASTEXITCODE -ne 0) { throw 'Formatting check failed' }
     & dotnet restore desktop.tests/RoLauncher.Desktop.Tests.csproj --locked-mode --configfile desktop/NuGet.Config

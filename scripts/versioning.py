@@ -3,11 +3,11 @@ from pathlib import Path
 import re
 import secrets
 
-PATTERN = r"(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)(?:-dev\.[0-9a-f]{12})?"
+PATTERN = r"(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)(?:-dev\.[0-9a-f]{12}|-beta\.[1-9][0-9]*)?"
 
 def core(version):
     if re.fullmatch(PATTERN, version) is None:
-        raise ValueError("Use MAJOR.MINOR.PATCH or MAJOR.MINOR.PATCH-dev.<12 hex digits>")
+        raise ValueError("Use MAJOR.MINOR.PATCH, MAJOR.MINOR.PATCH-beta.N or MAJOR.MINOR.PATCH-dev.<12 hex digits>")
     return version.split("-", 1)[0]
 
 def development(version):

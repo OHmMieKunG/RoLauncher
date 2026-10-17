@@ -215,6 +215,14 @@ pub struct Account {
     pub last_disconnect: Option<DateTime<Utc>>,
     #[serde(default)]
     pub reconnection_attempts: u64,
+    #[serde(default)]
+    pub successful_recoveries: u64,
+    #[serde(default)]
+    pub pending_recovery: bool,
+    #[serde(default)]
+    pub last_disconnect_reason: Option<String>,
+    #[serde(default)]
+    pub last_disconnect_code: Option<u32>,
     pub connected_since: Option<DateTime<Utc>>,
     /// Managed run; disconnects and automatic rejoins do not reset it.
     #[serde(default)]
@@ -256,6 +264,10 @@ impl Account {
             failures: 0,
             last_disconnect: None,
             reconnection_attempts: 0,
+            successful_recoveries: 0,
+            pending_recovery: false,
+            last_disconnect_reason: None,
+            last_disconnect_code: None,
             next_retry: None,
             connected_since: None,
             running_since: None,
@@ -395,10 +407,21 @@ mod tests {
         account.as_object_mut().unwrap().remove("resource");
         account.as_object_mut().unwrap().remove("anti_afk");
         account.as_object_mut().unwrap().remove("client");
+        for field in [
+            "successful_recoveries",
+            "pending_recovery",
+            "last_disconnect_reason",
+            "last_disconnect_code",
+        ] {
+            account.as_object_mut().unwrap().remove(field);
+        }
         let old: Account = serde_json::from_value(account).unwrap();
         assert_eq!(old.resource, ResourceSettings::default());
         assert!(!old.anti_afk.enabled);
         assert_eq!(old.client, crate::client::ClientSettings::default());
+        assert_eq!(old.successful_recoveries, 0);
+        assert!(!old.pending_recovery);
+        assert!(old.last_disconnect_reason.is_none() && old.last_disconnect_code.is_none());
         let entry: ProfileEntry = serde_json::from_str(r#"{"account_id":"1","alias":"fixture","target":{"place_id":1},"auto_recovery":true,"fallback_policy":"stay","group":""}"#).unwrap();
         assert_eq!(entry.resource, ResourceSettings::default());
         assert_eq!(entry.client, crate::client::ClientSettings::default());

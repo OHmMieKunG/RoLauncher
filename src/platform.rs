@@ -148,8 +148,25 @@ mod imp {
                 && target == current
         }
     }
+    pub(crate) fn control_session(pid: u32) -> Result<u32, String> {
+        let mut session = 0;
+        if unsafe { ProcessIdToSessionId(pid, &mut session) } == 0 {
+            return Err("Windows session unavailable".into());
+        }
+        Ok(session)
+    }
     pub(crate) struct ControlProcess(Handle);
     impl ControlProcess {
+        pub(crate) fn check_identity(&self, identity: &ProcessIdentity) -> Result<(), String> {
+            if process_time(self.raw())? != identity.creation_time
+                || !same_session(identity.pid)
+                || unsafe { GetProcessId(self.raw()) } != identity.pid
+                || unsafe { WaitForSingleObject(self.raw(), 0) } != WAIT_TIMEOUT
+            {
+                return Err("Verified process identity or session changed".into());
+            }
+            Ok(())
+        }
         pub(crate) fn raw(&self) -> HANDLE {
             self.0.0
         }
@@ -247,7 +264,12 @@ mod imp {
             generation,
         }
     }
-    pub(crate) fn gpu_engines() -> Result<std::collections::HashMap<u32, (f64, String)>, String> {
+    #[derive(Default)]
+    pub(crate) struct GpuCounters {
+        pub engines: std::collections::HashMap<u32, (f64, String)>,
+        pub memory: std::collections::HashMap<u32, Vec<crate::resource::GpuMemory>>,
+    }
+    pub(crate) fn gpu_engines() -> Result<GpuCounters, String> {
         #[derive(Deserialize)]
         #[serde(rename_all = "PascalCase")]
         struct EngineRow {
@@ -257,8 +279,7 @@ mod imp {
         let connection = wmi::WMIConnection::new().map_err(|_| "GPU counters unavailable")?;
         let rows: Vec<EngineRow> = connection.raw_query("SELECT Name, UtilizationPercentage FROM Win32_PerfFormattedData_GPUPerformanceCounters_GPUEngine")
             .map_err(|_| "GPU engine counters unavailable")?;
-        let mut result: std::collections::HashMap<u32, (f64, String)> =
-            std::collections::HashMap::new();
+        let mut result = GpuCounters::default();
         for row in rows {
             let Some(pid) = row
                 .name
@@ -270,10 +291,42 @@ mod imp {
             };
             let value = row.utilization_percentage.min(100) as f64;
             if result
+                .engines
                 .get(&pid)
                 .is_none_or(|(previous, _)| value > *previous)
             {
-                result.insert(pid, (value, row.name));
+                result.engines.insert(pid, (value, row.name));
+            }
+        }
+        #[derive(Deserialize)]
+        #[serde(rename_all = "PascalCase")]
+        struct MemoryRow {
+            name: String,
+            dedicated_usage: u64,
+        }
+        let memory: Result<Vec<MemoryRow>, _> = connection.raw_query("SELECT Name, DedicatedUsage FROM Win32_PerfFormattedData_GPUPerformanceCounters_GPUProcessMemory");
+        if let Ok(rows) = memory {
+            for row in rows {
+                let Some((pid, adapter)) = row
+                    .name
+                    .strip_prefix("pid_")
+                    .and_then(|s| s.split_once('_'))
+                else {
+                    continue;
+                };
+                let Ok(pid) = pid.parse::<u32>() else {
+                    continue;
+                };
+                if !adapter.starts_with("luid_") {
+                    continue;
+                }
+                let entries = result.memory.entry(pid).or_default();
+                if !entries.iter().any(|m| m.adapter == adapter) {
+                    entries.push(crate::resource::GpuMemory {
+                        adapter: adapter.into(),
+                        dedicated_bytes: row.dedicated_usage,
+                    });
+                }
             }
         }
         Ok(result)

@@ -4,7 +4,7 @@
 
 ## Install and start
 
-1. Download **setup-x64.exe** from [Releases](https://github.com/oangsa/RoLauncher/releases/latest).
+1. Download **setup-x64.exe** from [fork releases](https://github.com/OHmMieKunG/RoLauncher/releases).
 2. Install and open RoLauncher from Start.
 3. Use **Sign in** or **Import cookies**. Paste or import one cookie per line; blanks and duplicates are ignored.
 4. Choose account destinations, select accounts, and press **Start**.
