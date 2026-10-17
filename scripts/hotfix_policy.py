@@ -15,6 +15,9 @@ GOVERNANCE_PATHS = {
     'scripts/package.ps1',
     'scripts/test-release-promotion.py', 'scripts/test-hotfix-policy.py',
     'docs/RELEASE-GOVERNANCE.md', 'docs/HOTFIX-RELEASE-STRATEGY.md',
+    '.github/owner-evidence-policy.json', 'scripts/owner_evidence.py',
+    'scripts/test-owner-evidence.py', 'docs/OWNER-EVIDENCE.md',
+    'docs/SANDBOX-RELEASE-LIFECYCLE.md',
 }
 HOTFIX_FIELDS = {'schema', 'id', 'version', 'channel', 'source', 'baseline_tag',
                 'baseline_sha', 'base_sha', 'reviewed_sha', 'commits', 'paths', 'patch_sha256', 'review'}

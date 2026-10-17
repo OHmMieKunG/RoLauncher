@@ -11,6 +11,8 @@ try {
     if ($LASTEXITCODE -ne 0) { throw 'Release promotion checks failed' }
     & python "$PSScriptRoot\test-hotfix-policy.py"
     if ($LASTEXITCODE -ne 0) { throw 'Hotfix policy checks failed' }
+    & python "$PSScriptRoot\test-owner-evidence.py"
+    if ($LASTEXITCODE -ne 0) { throw 'Owner evidence checks failed' }
     & cargo test --locked
     if ($LASTEXITCODE -ne 0) { throw 'Tests failed' }
     & cargo fmt --check

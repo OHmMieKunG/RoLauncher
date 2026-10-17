@@ -240,7 +240,7 @@ def promotion_state(call, tag, sha, annotated=False):
     return ref
 
 
-def promote(call, run):
+def promote(call, run, evidence=None):
     intent = authorize(call, run)
     if intent is None:
         return "no-intent"
@@ -258,7 +258,6 @@ def promote(call, run):
                 and linux_run["head_repository"]["full_name"] == REPO and linux_run["path"] == ".github/workflows/linux.yml",
                 "Wrong Linux validation source")
         successful_jobs(call, linux_run, LINUX_CHECKS)
-    protected_branches(call, strict=intent.get('source') == 'hotfix')
     if not beta:
         require(call("/branches/main")["commit"]["sha"] == sha, "Stale intent: main has advanced")
     manifest_version = tomllib.loads(content(call, "Cargo.toml", sha))["package"]["version"]
@@ -289,9 +288,32 @@ def promote(call, run):
         latest = call("/releases/latest", missing_ok=True)
         require(not latest or tuple(map(int, version.split("."))) > tuple(map(int, latest["tag_name"].removeprefix("v").split("."))),
                 "Version must advance latest published stable")
+    # All candidate admission above is read-only. No human request until it succeeds.
+    from owner_evidence import binding_for
+    binding = binding_for(intent, run, linux_run, receipt_data)
+    require(evidence is not None, "Live owner evidence transport required")
+    finishing = evidence.stage == 'finish'
+    if not finishing:
+        controls = evidence.gate('preflight', call, binding)
+        protected_branches(controls, strict=True)
+        require(authorize(call, run) == intent, 'Release authority changed during preflight')
+        if not beta:
+            require(call('/branches/main')['commit']['sha'] == sha, 'Main advanced during preflight')
+        unchanged_run(call, run, source_checks)
+        if linux_run:
+            unchanged_run(call, linux_run, LINUX_CHECKS)
+        require(promotion_state(call, tag, sha, annotated=beta) == ref
+                and call('/releases/tags/' + tag, missing_ok=True) == release,
+                'Publication state changed during preflight; retry with fresh evidence')
+        evidence.fresh()
+    else:
+        evidence.resume(binding)
+        require(ref and release, "Interrupted staging must be reconciled in a new attempt")
     if not ref:
+        evidence.fresh()
         call("/git/refs", "POST", {"ref": "refs/tags/" + tag, "sha": sha})
     if not release:
+        evidence.fresh()
         release = call("/releases", "POST", {"tag_name": tag, "target_commitish": sha,
                        "name": "RoLauncher " + version, "body": notes + "\n\n" + marker + "\n",
                        "draft": True, "prerelease": beta, "make_latest": "false"})
@@ -305,11 +327,14 @@ def promote(call, run):
         require(asset["size"] == len(data) and asset.get("digest") == "sha256:" + hashlib.sha256(data).hexdigest(),
                 "Existing release asset differs; quarantine instead of replacing")
     existing = {a["name"] for a in assets}
-    if not release["draft"]:
+    if not release["draft"] or finishing:
         require(existing == set(files), "Published release is incomplete")
-        return "consumed"
-    for name in sorted(set(files) - existing):
-        call(upload + "?name=" + name, "POST", binary=files[name])
+    if not release['draft']:
+        require(release.get('immutable') is True, 'Consumed release must be immutable')
+    if not finishing:
+        for name in sorted(set(files) - existing):
+            evidence.fresh()
+            call(upload + "?name=" + name, "POST", binary=files[name])
     uploaded = call(path + "/assets")
     require(len(uploaded) == len(files) and {a["name"] for a in uploaded} == set(files), "Incomplete uploaded assets")
     for asset in uploaded:
@@ -319,12 +344,38 @@ def promote(call, run):
     if not beta:
         require(call("/branches/main")["commit"]["sha"] == sha, "Main advanced before publication")
         require(authorize(call, run) == intent, "Release authority changed before publication")
-    protected_branches(call, strict=intent.get('source') == 'hotfix')
+    controls = evidence.gate('final', call, binding)
+    protected_branches(controls, strict=True)
+    # Repeat authority after the attended wait, not only before asking the owner.
+    require(authorize(call, run) == intent, 'Release authority changed during owner wait')
+    if not beta:
+        require(call('/branches/main')['commit']['sha'] == sha, 'Main advanced during owner wait')
     unchanged_run(call, run, source_checks)
     if linux_run:
         unchanged_run(call, linux_run, LINUX_CHECKS)
+    require(promotion_state(call, tag, sha, annotated=beta), 'Version tag disappeared during owner wait')
+    require(call(path + '/assets') == uploaded, 'Release assets changed during owner wait')
+    current = call(path)
+    require(current['id'] == release['id'] and current['draft'] == release['draft']
+            and current['prerelease'] == beta and current['target_commitish'] == sha
+            and marker in (current.get('body') or ''), 'Release state changed during owner wait')
+    if not beta and release['draft']:
+        latest = call('/releases/latest', missing_ok=True)
+        require(not latest or tuple(map(int, version.split('.'))) >
+                tuple(map(int, latest['tag_name'].removeprefix('v').split('.'))), 'Latest stable advanced during owner wait')
+    evidence.fresh()
+    if not release['draft']:
+        current = call(path)
+        require(current.get('immutable') is True and not current['draft']
+                and current['target_commitish'] == sha and current['prerelease'] == beta
+                and marker in (current.get('body') or ''), 'Consumed release readback mismatch')
+        return 'consumed'
     result = call(path, "PATCH", {"draft": False, "prerelease": beta, "make_latest": "false" if beta else "true"})
     require(not result["draft"] and result["prerelease"] == beta, "Promotion response has wrong channel")
+    current = call(path)
+    require(current.get('immutable') is True and not current['draft'] and current['prerelease'] == beta
+            and current['target_commitish'] == sha and marker in (current.get('body') or ''),
+            'Published release immutable readback mismatch; quarantine, never replace')
     return "published"
 
 
@@ -357,7 +408,7 @@ def github_api(token):
                 require(length is None or 0 <= int(length) <= limit, "GitHub response Content-Length exceeds size limit")
                 result = response.read(limit + 1)
                 require(len(result) <= limit, "GitHub response exceeds size limit")
-                return result if raw else json.loads(result) if result else None
+                return result if raw else json.loads(result, object_pairs_hook=unique_object) if result else None
         except HTTPError as error:
             if error.code == 404 and missing_ok:
                 return None
@@ -365,7 +416,7 @@ def github_api(token):
     return call
 
 
-def promote_event(call, event, channel=None):
+def promote_event(call, event, channel=None, evidence=None):
     """Reconcile a GitHub completion event against fresh API evidence, never its artifacts alone."""
     require(event["repository"]["default_branch"] == "main", "Trusted workflow must reside on main")
     source = event["workflow_run"]
@@ -381,7 +432,7 @@ def promote_event(call, event, channel=None):
         run = runs["workflow_runs"][0]
     if channel:
         require(run["path"] == (BETA if channel == "beta" else CI), "Wrong publication channel")
-    return promote(call, run)
+    return promote(call, run, evidence)
 
 
 def main(channel=None):
@@ -391,7 +442,20 @@ def main(channel=None):
     require(os.environ.get("GITHUB_EVENT_NAME") == "workflow_run", "Only workflow_run may promote")
     require(os.environ.get("GITHUB_REPOSITORY") == REPO, "Official repository required")
     event = json.loads(Path(os.environ["GITHUB_EVENT_PATH"]).read_text(encoding="utf-8"))
-    print(promote_event(github_api(os.environ["GITHUB_TOKEN"]), event, channel))
+    import argparse
+    from owner_evidence import StagedEvidence, ChallengeReady
+    parser = argparse.ArgumentParser()
+    parser.add_argument('--stage', choices=('prepare', 'stage', 'finish'), required=True)
+    args = parser.parse_args()
+    transport = StagedEvidence(args.stage)
+    try:
+        result = promote_event(github_api(os.environ['GITHUB_TOKEN']), event, channel, transport)
+    except ChallengeReady:
+        result = 'challenge-ready'
+    print(result)
+    if args.stage == 'prepare':
+        with Path(os.environ['GITHUB_OUTPUT']).open('a', encoding='utf-8') as output:
+            output.write('admitted=' + ('true' if result == 'challenge-ready' else 'false') + '\n')
 
 
 if __name__ == "__main__":
